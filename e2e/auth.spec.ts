@@ -22,7 +22,7 @@ test("a wrong password is refused", async ({ page }) => {
 
 test("the cashier signs in with a password and out again", async ({ page }) => {
   await officeSignIn(page, CASHIER.phone, CASHIER.password);
-  await expect(page.getByText(signedInAs(CASHIER.name))).toBeVisible();
+  await expect(page.getByRole("heading", { name: signedInAs(CASHIER.name) })).toBeVisible();
   await expect(page.getByText(az.home.roles.replace("{roles}", az.roles.CASHIER))).toBeVisible();
   await page.getByRole("button", { name: az.home.signOut }).click();
   await expect(page).toHaveURL(/\/giris$/);
@@ -38,7 +38,7 @@ test("management needs a TOTP code; then registers the tablet; staff switch in b
 
   const code = totp(base32Decode(MANAGER.totpSecret), Math.floor(Date.now() / 1000));
   await officeSignIn(page, MANAGER.phone, MANAGER.password, code);
-  await expect(page.getByText(signedInAs(MANAGER.name))).toBeVisible();
+  await expect(page.getByRole("heading", { name: signedInAs(MANAGER.name) })).toBeVisible();
 
   await page.getByLabel(az.home.tabletName).fill("Sex planşeti");
   await page.getByRole("button", { name: az.home.registerTablet }).click();
@@ -55,7 +55,7 @@ test("management needs a TOTP code; then registers the tablet; staff switch in b
   await page.getByLabel(az.auth.who).selectOption({ label: FORMEN.name });
   await page.getByLabel(az.auth.pin).fill(FORMEN.pin);
   await page.getByRole("button", { name: az.auth.pin }).click();
-  await expect(page.getByText(signedInAs(FORMEN.name))).toBeVisible();
+  await expect(page.getByRole("heading", { name: signedInAs(FORMEN.name) })).toBeVisible();
 
   // Idle longer than the tablet timeout: the next request goes back to the PIN screen.
   await page.waitForTimeout((IDLE_SECONDS + 1) * 1000);

@@ -154,7 +154,9 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   await page.getByLabel(az.auth.who).selectOption({ label: FORMEN.name });
   await page.getByLabel(az.auth.pin).fill(FORMEN.pin);
   await page.getByRole("button", { name: az.auth.pin }).click();
-  await expect(page.getByText(az.home.signedInAs.replace("{name}", FORMEN.name))).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: az.home.signedInAs.replace("{name}", FORMEN.name) }),
+  ).toBeVisible();
 });
 
 test.afterAll(async () => {
