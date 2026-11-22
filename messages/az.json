@@ -1,0 +1,15 @@
+{
+  "home": {
+    "title": "Highest Service əməliyyat sistemi",
+    "subtitle": "Sistem qurulur. Ekranlar növbəti mərhələlərdə əlavə olunacaq."
+  },
+  "audit": {
+    "plateMovedToOtherVehicle": "Nömrə başqa avtomobildə qeydə alındı",
+    "plateReplaced": "Avtomobilin nömrəsi dəyişdi",
+    "plateRecorded": "Avtomobilin nömrəsi qeydə alındı",
+    "seedUser": "İşçi hesabı ilkin quraşdırma ilə yaradıldı",
+    "documentSubmitted": "Sənəd təqdim edildi",
+    "documentAnnulled": "Sənəd ləğv edildi",
+    "documentPosted": "Sənəd qeydə alındı"
+  }
+}
