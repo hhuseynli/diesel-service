@@ -15,6 +15,10 @@ export const createdAt = () =>
  */
 export const actorDefault = sql`(nullif(current_setting('app.user_id', true), ''))::uuid`;
 
+/** `'A', 'B'` from a TS list of constant values, for use inside larger CHECK expressions. */
+export const sqlList = (values: readonly string[]) =>
+  sql.raw(values.map((v) => `'${v}'`).join(", "));
+
 /** Builds `col IN ('A', 'B')` for CHECK constraints from a TS list of values. */
 export const oneOf = (column: string, values: readonly string[]) =>
   sql.raw(`${column} IN (${values.map((v) => `'${v}'`).join(", ")})`);

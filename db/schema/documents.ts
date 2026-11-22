@@ -12,6 +12,7 @@ import {
 } from "drizzle-orm/pg-core";
 import { DOC_STATUSES, DOC_TYPES } from "@/lib/documents/types";
 import { createdAt, id, oneOf } from "./columns";
+import { jobOrders } from "./jobs";
 import { createdBy } from "./people";
 import { contragents } from "./contragents";
 import { vehicles } from "./vehicles";
@@ -31,8 +32,7 @@ export const documents = pgTable(
     version: integer("version").notNull().default(1),
     status: text("status").notNull().default("DRAFT"),
     docDate: date("doc_date"),
-    // Foreign key added with job_orders in milestone 2.
-    jobOrderId: uuid("job_order_id"),
+    jobOrderId: uuid("job_order_id").references((): AnyPgColumn => jobOrders.id),
     // Not in the spec's field list (plan 01, F3).
     vehicleId: uuid("vehicle_id").references(() => vehicles.id),
     contragentId: uuid("contragent_id").references(() => contragents.id),
