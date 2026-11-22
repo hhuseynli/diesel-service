@@ -7,7 +7,11 @@
     "registerTablet": "Bu cihazı planşet kimi qeydiyyata al",
     "tabletName": "Planşetin adı",
     "tabletRegistered": "Bu cihaz planşet kimi qeydiyyatdadır.",
-    "switchUser": "İstifadəçini dəyiş"
+    "switchUser": "İstifadəçini dəyiş",
+    "openBoard": "İş sifarişləri",
+    "odometerAlerts": "Yürüş xəbərdarlıqları (son 30 gün)",
+    "odometerLower": "{number} · {vin}: {km} km, əvvəlkindən az. Səbəb: {reason}",
+    "odometerHigh": "{number} · {vin}: {km} km, gündəlik normadan çox"
   },
   "audit": {
     "plateMovedToOtherVehicle": "Nömrə başqa avtomobildə qeydə alındı",
@@ -152,7 +156,20 @@
     "clearSignature": "Təmizlə",
     "save": "Saxla",
     "saved": "İş sifarişi {number} açıldı",
-    "printSticker": "QR stikeri çap et"
+    "printSticker": "QR stikeri çap et",
+    "otherVehicle": "Başqa maşın",
+    "openJobLink": "İş sifarişini aç",
+    "noClients": "Müştəri tapılmadı",
+    "odometerPrevious": "Əvvəlki yürüş: {km} km",
+    "odometerReasonHint": "Yürüş əvvəlkindən azdırsa, səbəbi yazın.",
+    "mechanicOptional": "Təmirçi (sonra da təyin etmək olar)",
+    "clientLine": "Müştəri: {name}",
+    "plateLabel": {
+      "CURRENT": "cari nömrə",
+      "FORMER": "köhnə nömrə, {date} tarixinədək",
+      "UNCONFIRMED": "təsdiqlənməmiş nömrə"
+    },
+    "plateResult": "{plate} ({label}) · {vehicle} · VIN {vin}"
   },
   "job": {
     "title": "İş sifarişi {number}",
@@ -198,7 +215,17 @@
     "parts": "Hissələr",
     "removedParts": "Çıxarılan hissələr",
     "waitingWarehouse": "Anbar Qüsur aktını hazırlayır.",
-    "waitingClient": "Müştərinin təsdiqi gözlənilir."
+    "waitingClient": "Müştərinin təsdiqi gözlənilir.",
+    "status": "Status",
+    "odometerFlagged": "Yürüş qeyri-adidir; sahibkara bildiriləcək.",
+    "reprintSticker": "Stikeri yenidən çap et",
+    "reprintReason": "Səbəb (itib, zədələnib)",
+    "closed": "Bu iş sifarişi üzrə formen addımı qalmayıb.",
+    "waitingPayment": "Ödəniş gözlənilir.",
+    "byMechanic": "Təmirçi: {name}",
+    "partLine": "{description} — {quantity} {unit}",
+    "removedLine": "{description} — {disposition}",
+    "additionalLine": "{description} (təmir zamanı əlavə)"
   },
   "sticker": {
     "title": "QR stiker",
@@ -215,6 +242,8 @@
     "openJob": "Bu maşının açıq iş sifarişi var.",
     "fileRejected": "Fayl qəbul edilmədi (növ və ya ölçü).",
     "findingNeedsPhoto": "Hər nasazlığa ən azı bir şəkil və ya video lazımdır.",
-    "conditionsMissing": "Bu addım üçün şərtlər tamamlanmayıb."
+    "conditionsMissing": "Bu addım üçün şərtlər tamamlanmayıb.",
+    "signatureMissing": "İmza atılmayıb.",
+    "notFound": "Maşın tapılmadı."
   }
 }

@@ -76,6 +76,21 @@ Each has the standard triggers and grants. Findings can only be added after "Anb
 - **e2e on a tablet viewport, portrait 800×1280:** a new car from start to TEHVIL_VERILDI by PIN-signed staff; a returning car by sticker code; a corporate car not on its contract.
 - Every milestone 1–3 suite stays green.
 
+## Changes during implementation
+
+| # | Change | Why |
+| --- | --- | --- |
+| C1 | **B9 is recorded, not yet required.** Removed parts are recorded with a photo and a disposition, but HAZIR does not require one per replaced part. | Which parts were replaced is known only from stock issues (milestone 5). The rule moves into `job_orders_intake_guard` then, like B8. |
+| C2 | **B6 alerts:** the owner's home page lists odometer readings flagged in the last 30 days (`odometerAlerts`). No separate notification table: the flags on `odometer_readings` are the record, and milestone 6 sends them through the outbox. | One source of truth for the flag. |
+| C3 | **Intake photos are evidence for one job only.** `receiveVehicle` refuses six photos that are not distinct, or that another job already uses (`IntakePhotoReusedError`). | The wizard passes uploaded photo ids between steps in the URL; without this check a photo could be reused (R2). |
+| C4 | **The wizard keeps its step in the URL** (`v`, `ok`, `c`, `oc`, `cd`, `p`). Photos are uploaded on "Davam et"; nothing is written to the job until "Saxla", in one transaction. "Davam et" uses required file inputs; the server refuses a missing photo either way. | No client state to lose on a reload; the database still checks everything at "Saxla". |
+| C5 | **A car that was handed over has left the workshop** (`car_released`): its unpaid job doesn't block a new visit, and the intake screen treats it as a returning car. A car still in the workshop leads to its open job. | Follows the M2 open-job rule; the e2e covers both. |
+| C6 | **"Yeni maşın" is not a separate button on the board.** A VIN that isn't found leads straight to the new vehicle form from "Maşın qəbul et". | One entry point; the same result. |
+| C7 | **The VIN decoder is manual entry only** (`decodeSource: "MANUAL"`); `vin_decodes` is ready for a provider (R19). | Plan B3 thin version. |
+| C8 | **An additional finding during work is stored with `additional = true`.** The ELAVE_AKT document it becomes is created by the warehouse in milestone 5. | Estimates are milestone 5. |
+| C9 | **The e2e test takes the warehouse and approval steps through `lib`** as a WAREHOUSEMAN and MANAGEMENT user, and raises the tablet idle timeout for its own run. | Those screens come in milestones 5 and 6; dev-server compiles exceed the 3-second idle used by the auth test. |
+| C10 | **Display formats:** `Quantity.formatAz()` and `groupThousands()` in `lib/money` (decimal comma, space between thousands). | azerbaijani-ui. |
+
 ## Open items that don't block this milestone
 
 - spec 01 open questions 1–5;

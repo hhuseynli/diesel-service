@@ -1,4 +1,4 @@
-import { and, desc, eq, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import {
   contragents,
   documentSignatures,
@@ -50,6 +50,9 @@ export class OdometerReasonRequiredError extends Error {
   }
 }
 
+/** Each intake photo is evidence for one job only: six distinct, unused attachments. */
+export class IntakePhotoReusedError extends Error {}
+
 export interface ReceiveInput extends Omit<OpenJobInput, "ownerChanged"> {
   /** Required only when the client differs from the vehicle's last job. */
   ownerChanged?: boolean;
@@ -87,6 +90,16 @@ export async function receiveVehicle(tx: Tx, input: ReceiveInput): Promise<Recei
   for (const slot of INTAKE_PHOTO_SLOTS) {
     if (!input.photos[slot]) throw new Error(`The ${slot} photo is missing`);
   }
+  const photoIds = INTAKE_PHOTO_SLOTS.map((slot) => input.photos[slot]);
+  if (new Set(photoIds).size !== photoIds.length) {
+    throw new IntakePhotoReusedError("The six intake photos must be different files");
+  }
+  const [used] = await tx
+    .select({ id: intakePhotos.id })
+    .from(intakePhotos)
+    .where(inArray(intakePhotos.attachmentId, photoIds))
+    .limit(1);
+  if (used) throw new IntakePhotoReusedError("An intake photo already belongs to another job");
 
   const lastClient = await lastClientOf(tx, input.vehicleId);
   const asked = lastClient !== null && lastClient !== input.contragentId;

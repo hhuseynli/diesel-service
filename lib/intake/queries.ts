@@ -138,6 +138,7 @@ export interface JobCard {
   id: string;
   number: string;
   status: JobStatus;
+  vehicleId: string;
   vehicle: string;
   vin: string;
   plate: string | null;
@@ -167,6 +168,7 @@ export async function jobCard(db: Db | Tx, jobId: string): Promise<JobCard | nul
     id: string;
     number: string;
     status: JobStatus;
+    vehicle_id: string;
     make: string | null;
     model: string | null;
     vin: string;
@@ -175,7 +177,7 @@ export async function jobCard(db: Db | Tx, jobId: string): Promise<JobCard | nul
     mechanic: string | null;
     complaints: string | null;
   }>(sql`
-    SELECT j.id, j.number, j.status, v.make, v.model, j.vin_snapshot AS vin,
+    SELECT j.id, j.number, j.status, j.vehicle_id, v.make, v.model, j.vin_snapshot AS vin,
            j.plate_snapshot AS plate, c.name AS client, m.full_name AS mechanic, j.complaints
       FROM job_orders j
       JOIN vehicles v ON v.id = j.vehicle_id
@@ -216,6 +218,7 @@ export async function jobCard(db: Db | Tx, jobId: string): Promise<JobCard | nul
     id: j.id,
     number: j.number,
     status: j.status,
+    vehicleId: j.vehicle_id,
     vehicle: [j.make, j.model].filter(Boolean).join(" "),
     vin: j.vin,
     plate: j.plate,
@@ -233,4 +236,55 @@ export async function jobCard(db: Db | Tx, jobId: string): Promise<JobCard | nul
     parts: parts.rows.map((p) => ({ ...p, unitHint: p.unit_hint })),
     removedParts: removed.rows,
   };
+}
+
+export async function clientName(db: Db | Tx, contragentId: string): Promise<string | null> {
+  const { rows } = await db.execute<{ name: string }>(
+    sql`SELECT name FROM contragents WHERE id = ${contragentId}`,
+  );
+  return rows[0]?.name ?? null;
+}
+
+/** The vehicle's last odometer reading in km, if any. */
+export async function lastOdometer(db: Db | Tx, vehicleId: string): Promise<number | null> {
+  const { rows } = await db.execute<{ value_km: number }>(sql`
+    SELECT value_km FROM odometer_readings WHERE vehicle_id = ${vehicleId}
+     ORDER BY created_at DESC LIMIT 1`);
+  return rows[0]?.value_km ?? null;
+}
+
+export interface OdometerAlert {
+  jobId: string;
+  number: string;
+  vin: string;
+  valueKm: number;
+  belowPrevious: boolean;
+  reason: string | null;
+}
+
+/**
+ * Odometer readings flagged in the last 30 days, newest first, for the owner (R9; plan 04,
+ * B6). Sending them as messages comes with the outbox (milestone 6).
+ */
+export async function odometerAlerts(db: Db | Tx): Promise<OdometerAlert[]> {
+  const { rows } = await db.execute<{
+    job_id: string;
+    number: string;
+    vin: string;
+    value_km: number;
+    below_previous: boolean;
+    reason: string | null;
+  }>(sql`
+    SELECT j.id AS job_id, j.number, j.vin_snapshot AS vin, r.value_km, r.below_previous, r.reason
+      FROM odometer_readings r JOIN job_orders j ON j.id = r.job_order_id
+     WHERE (r.below_previous OR r.above_daily_limit) AND r.created_at > now() - interval '30 days'
+     ORDER BY r.created_at DESC LIMIT 50`);
+  return rows.map((r) => ({
+    jobId: r.job_id,
+    number: r.number,
+    vin: r.vin,
+    valueKm: r.value_km,
+    belowPrevious: r.below_previous,
+    reason: r.reason,
+  }));
 }
