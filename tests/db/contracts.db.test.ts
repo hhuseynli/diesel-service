@@ -54,6 +54,12 @@ const add = (contractId: string, vehicleId: string, plate?: string) =>
 const check = (vehicleId: string, contragentId: string) =>
   checkContract(t.db, { vehicleId, contragentId });
 
+/** Ends a contract by date: an audited amendment of valid_to to yesterday. */
+const expire = (contractId: string) =>
+  withActor(t.db, { userId: manager, reason: "Müddət bitdi" }, (tx) =>
+    tx.update(contracts).set({ validTo: days.yesterday }).where(eq(contracts.id, contractId)),
+  );
+
 describe("checkContract, by VIN only", () => {
   it("ON_CONTRACT, whatever plate the contract lists or the car now has", async () => {
     const company = await newClient(t.db, manager, "HUQUQI", "Logistika MMC");
@@ -89,16 +95,18 @@ describe("checkContract, by VIN only", () => {
 
   it("CONTRACT_EXPIRED when ended, not started or terminated; auto-renew stays valid", async () => {
     const company = await newClient(t.db, manager, "HUQUQI");
-    const cases: [Partial<ContractInput>, string][] = [
-      [{ validFrom: "2025-01-01", validTo: days.yesterday }, "CONTRACT_EXPIRED"],
-      [{ validFrom: days.tomorrow }, "CONTRACT_EXPIRED"],
-      [{ validFrom: "2025-01-01", validTo: days.yesterday, autoRenew: true }, "ON_CONTRACT"],
-      [{ validFrom: "2025-01-01", validTo: days.today }, "ON_CONTRACT"],
+    // Cars are added while the contract is open; `expireAfter` then ends it by date.
+    const cases: [Partial<ContractInput>, boolean, string][] = [
+      [{ validFrom: "2025-01-01" }, true, "CONTRACT_EXPIRED"],
+      [{ validFrom: days.tomorrow }, false, "CONTRACT_EXPIRED"],
+      [{ validFrom: "2025-01-01", autoRenew: true }, true, "ON_CONTRACT"],
+      [{ validFrom: "2025-01-01", validTo: days.today }, false, "ON_CONTRACT"],
     ];
-    for (const [terms, expected] of cases) {
+    for (const [terms, expireAfter, expected] of cases) {
       const c = await contract(company, { signedOn: "2025-01-01", ...terms });
       const car = await newVehicle(t.db, manager, "CNTRCT");
       await add(c, car.id);
+      if (expireAfter) await expire(c);
       expect((await check(car.id, company)).check, JSON.stringify(terms)).toBe(expected);
     }
 
@@ -402,11 +410,7 @@ describe("contracts end and renew (review of plan 02)", () => {
 
   it("a client whose contracts have all ended gets NO_CONTRACT for an unlisted car", async () => {
     const company = await newClient(t.db, manager, "HUQUQI");
-    await contract(company, {
-      signedOn: "2025-01-01",
-      validFrom: "2025-01-01",
-      validTo: days.yesterday,
-    });
+    await expire(await contract(company, { signedOn: "2025-01-01", validFrom: "2025-01-01" }));
     const car = await newVehicle(t.db, manager, "CNTRCT");
     expect((await check(car.id, company)).check).toBe("NO_CONTRACT");
   });
@@ -454,13 +458,10 @@ describe("contracts end and renew (review of plan 02)", () => {
 describe("job contract links and roles (review of plan 02)", () => {
   it("CONTRACT_EXPIRED needs a decision too, and SEPARATE_PAID is stored", async () => {
     const company = await newClient(t.db, manager, "HUQUQI");
-    const c = await contract(company, {
-      signedOn: "2025-01-01",
-      validFrom: "2025-01-01",
-      validTo: days.yesterday,
-    });
+    const c = await contract(company, { signedOn: "2025-01-01", validFrom: "2025-01-01" });
     const car = await newVehicle(t.db, manager, "CNTRCT");
     await add(c, car.id);
+    await expire(c);
     await expect(
       newJob(t.db, manager, { vehicleId: car.id, contragentId: company }),
     ).rejects.toEqual(new ContractDecisionRequiredError("CONTRACT_EXPIRED"));
@@ -529,5 +530,78 @@ describe("job contract links and roles (review of plan 02)", () => {
         ),
       ).rejects.toBeInstanceOf(ImmutableError);
     }
+  });
+});
+
+describe("database rules from the second verifier pass", () => {
+  it("a contract ended by date takes no cars; a not-yet-started one does, and keeps them", async () => {
+    const company = await newClient(t.db, manager, "HUQUQI");
+    const ended = await contract(company, { signedOn: "2025-01-01", validFrom: "2025-01-01" });
+    await expire(ended);
+    await expect(add(ended, (await newVehicle(t.db, manager, "CNTRCT")).id)).rejects.toBeInstanceOf(
+      ImmutableError,
+    );
+
+    const upcoming = await contract(company, { validFrom: days.tomorrow });
+    const car = await newVehicle(t.db, manager, "CNTRCT");
+    await add(upcoming, car.id);
+    // Another client's contract cannot take a car from a contract that has not started.
+    const other = await contract(await newClient(t.db, manager, "HUQUQI"));
+    await expect(add(other, car.id)).rejects.toBeInstanceOf(VehicleOnAnotherContractError);
+  });
+
+  it("the database computes the contract check: a job cannot claim another result", async () => {
+    const company = await newClient(t.db, manager, "HUQUQI");
+    const c = await contract(company);
+    const car = await newVehicle(t.db, manager, "CNTRCT");
+    await add(c, car.id);
+    const insert = (values: Partial<typeof jobOrders.$inferInsert>) =>
+      withActor(t.db, { userId: manager }, async (tx) => {
+        const { number } = await assignNumber(tx, "JOB_ORDER");
+        await tx.insert(jobOrders).values({
+          number,
+          vehicleId: car.id,
+          contragentId: company,
+          contractCheck: "ON_CONTRACT",
+          contractId: c,
+          formenId: manager,
+          ...values,
+        });
+      });
+    for (const wrong of [
+      { contractCheck: "NO_CONTRACT", contractId: null },
+      { contractCheck: "ON_CONTRACT", contractId: null },
+      { contractCheck: "NOT_ON_CONTRACT", contractId: null, contractDecision: "SEPARATE_PAID" },
+    ]) {
+      await expect(insert(wrong), JSON.stringify(wrong)).rejects.toBeInstanceOf(ImmutableError);
+    }
+    await withActor(t.db, { userId: manager }, (tx) => terminateContract(tx, c, "Bitdi"));
+    await expect(insert({})).rejects.toBeInstanceOf(ImmutableError);
+  });
+
+  it("a job's formen and mechanic must hold their roles, also when changed later", async () => {
+    const cashier = await createUser(t.migratorPool, { roles: ["CASHIER"] });
+    const job = await newJob(t.db, manager, {
+      vehicleId: (await newVehicle(t.db, manager, "CNTRCT")).id,
+      contragentId: await newClient(t.db, manager),
+    });
+    for (const set of [{ formenId: cashier }, { mechanicId: cashier }]) {
+      await expect(
+        withActor(t.db, { userId: manager, reason: "x" }, (tx) =>
+          tx.update(jobOrders).set(set).where(eq(jobOrders.id, job.id)),
+        ),
+      ).rejects.toBeInstanceOf(ImmutableError);
+    }
+    // On an ON_CONTRACT job the contract link cannot be dropped or changed either.
+    const company = await newClient(t.db, manager, "HUQUQI");
+    const c = await contract(company);
+    const car = await newVehicle(t.db, manager, "CNTRCT");
+    await add(c, car.id);
+    const linked = await newJob(t.db, manager, { vehicleId: car.id, contragentId: company });
+    await expect(
+      withActor(t.db, { userId: manager, reason: "x" }, (tx) =>
+        tx.update(jobOrders).set({ contractId: null }).where(eq(jobOrders.id, linked.id)),
+      ),
+    ).rejects.toBeInstanceOf(ImmutableError);
   });
 });

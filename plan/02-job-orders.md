@@ -178,6 +178,11 @@ Foreign keys added: `documents.job_order_id` → job_orders, and `vehicle_plates
 | `moveJob`, `cancelJob` and `resolveHold` lock the job row | Moving to the current status, an unknown job, or a concurrent second move is an error, not a silent no-op. `removeVehicle` on a car that isn't on the contract is an error too. |
 | Deferred to milestone 4 (intake) | The change-of-owner question at intake ("Sahibi dəyişib?", section 3a). |
 | Known limitation | `audit_log` rows can still be inserted by the owner role through `log_denied`, which is not a trigger. The app role can't insert them. |
+| **Second verifier pass:** | |
+| Migration `0018_verifier_pass2_fixes` | **Prefixes:** `number_from_counter` also checks that the prefix belongs to the series (`series_prefix`), which closes the `EA-…` reuse of a QUSUR_AKTI number. A test checks that the SQL prefixes match `lib/numbering/prefixes.ts`. **Corrected versions:** a version must follow an APPROVED or POSTED document of the same type, with version + 1. **Contract check:** `contract_check()` computes the check in the database, used by both `lib/contracts.checkContract` and the job guard; a job can't claim another result. **Ended contracts:** a contract that has ended (not ACTIVE, or past `valid_to` without auto-renew) takes no cars, and a contract that hasn't started yet is not ended. **Staff roles:** a job's formen and mechanic must hold their roles, also when changed later. |
+| `addVehicle` takeover and import use "ended", not "valid today" | A car on another contract that hasn't started yet stays there. A renewal takes over cars only once the old contract has ended. |
+| Known limitation | The owner role can still get past "events only from the trigger", through its own trigger or `ALTER TABLE … DISABLE TRIGGER`. Only a direct INSERT is blocked. The owner role belongs to migrations and is trusted. |
+| Known limitation | A release and a move can happen in one UPDATE (`contract_decision` and `status` together). The audit row records both. |
 
 ## Proof
 

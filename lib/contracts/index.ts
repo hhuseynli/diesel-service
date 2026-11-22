@@ -91,15 +91,11 @@ export async function terminateContract(tx: Tx, contractId: string, reason: stri
   );
 }
 
-/** A contract that covers cars today: ACTIVE, started, and not ended unless it auto-renews (C1). */
-const VALID_TODAY = sql.raw(`(c.status = 'ACTIVE' AND c.valid_from <= baku_date()
-  AND (c.valid_to IS NULL OR c.valid_to >= baku_date() OR c.auto_renew))`);
-
-/** The car's current contract row, if any, and whether that contract is valid today. */
+/** The car's current contract row, if any, and whether that contract has ended. */
 async function currentContractOf(tx: Tx, vehicleId: string) {
-  const { rows } = await tx.execute<{ contract_id: string; valid: boolean }>(sql`
-    SELECT cv.contract_id, ${VALID_TODAY} AS valid
-      FROM contract_vehicles cv JOIN contracts c ON c.id = cv.contract_id
+  const { rows } = await tx.execute<{ contract_id: string; ended: boolean }>(sql`
+    SELECT cv.contract_id, contract_ended(cv.contract_id) AS ended
+      FROM contract_vehicles cv
      WHERE cv.vehicle_id = ${vehicleId} AND cv.removed_on IS NULL
        FOR UPDATE OF cv`);
   return rows[0];
@@ -107,8 +103,9 @@ async function currentContractOf(tx: Tx, vehicleId: string) {
 
 /**
  * Puts a car on a contract. A car still listed on a contract that has ended (terminated,
- * annulled or expired) is taken off it first, so a renewal contract can take over its
- * cars. A car on another contract that is valid today is refused (plan 02, C2).
+ * annulled, or past valid_to without auto-renew) is taken off it first, so a renewal can
+ * take over its cars. A car on another contract that has not ended (including one that
+ * has not started yet) is refused (plan 02, C2). Ended contracts take no cars (database).
  */
 export async function addVehicle(
   tx: Tx,
@@ -120,9 +117,9 @@ export async function addVehicle(
   if (current?.contract_id === contractId) {
     throw new VehicleOnAnotherContractError("The vehicle is already on this contract");
   }
-  if (current && current.valid) {
+  if (current && !current.ended) {
     throw new VehicleOnAnotherContractError(
-      "The vehicle is on another contract that is valid today",
+      "The vehicle is on another contract that has not ended",
     );
   }
   if (current) await removeVehicle(tx, current.contract_id, vehicleId, "audit.contractEnded");
@@ -166,8 +163,8 @@ export async function removeVehicle(tx: Tx, contractId: string, vehicleId: strin
 
 /**
  * Imports a contract's vehicle list by VIN, all or nothing. A list with any row
- * missing a VIN, an invalid or repeated VIN, or a car on another contract that is
- * valid today is rejected with every such row listed. New cars get the list's plate as
+ * missing a VIN, an invalid or repeated VIN, or a car on another contract that has
+ * not ended is rejected with every such row listed. New cars get the list's plate as
  * a CONTRACT plate; known cars keep their plate history (plan 02, C4). A list plate
  * that is currently on another car marks that car UNCONFIRMED; those are returned as
  * plate conflicts for the notice (section 3a, rule 5).
@@ -201,12 +198,11 @@ export async function importVehicleList(
           vin: string;
           vehicle_id: string;
           contract_id: string | null;
-          valid: boolean | null;
+          ended: boolean | null;
         }>(sql`
-          SELECT v.vin, v.id AS vehicle_id, cv.contract_id, ${VALID_TODAY} AS valid
+          SELECT v.vin, v.id AS vehicle_id, cv.contract_id, contract_ended(cv.contract_id) AS ended
             FROM vehicles v
             LEFT JOIN contract_vehicles cv ON cv.vehicle_id = v.id AND cv.removed_on IS NULL
-            LEFT JOIN contracts c ON c.id = cv.contract_id
            WHERE v.vin IN (${sql.join(
              valid.map((v) => sql`${v}`),
              sql`, `,
@@ -216,7 +212,7 @@ export async function importVehicleList(
   const byVin = new Map(known.map((k) => [k.vin, k]));
   vins.forEach((vin, i) => {
     const k = byVin.get(vin);
-    if (k?.contract_id && k.contract_id !== contractId && k.valid) {
+    if (k?.contract_id && k.contract_id !== contractId && !k.ended) {
       problems.push({ row: i + 1, problem: "ON_ANOTHER_CONTRACT", vin });
     }
   });
@@ -270,23 +266,9 @@ export async function checkContract(
   db: Db | Tx,
   input: { vehicleId: string; contragentId: string },
 ): Promise<ContractCheckResult> {
-  const covering = await db.execute<{ contract_id: string; valid: boolean }>(sql`
-    SELECT c.id AS contract_id, ${VALID_TODAY} AS valid
-      FROM contract_vehicles cv
-      JOIN contracts c ON c.id = cv.contract_id
-     WHERE cv.vehicle_id = ${input.vehicleId} AND cv.removed_on IS NULL
-       AND c.contragent_id = ${input.contragentId} AND c.status <> 'ANNULLED'`);
-  const row = covering.rows[0];
-  if (row) {
-    return { check: row.valid ? "ON_CONTRACT" : "CONTRACT_EXPIRED", contractId: row.contract_id };
-  }
-
-  const current = await db.execute<{ id: string }>(sql`
-    SELECT c.id FROM contracts c
-     WHERE c.contragent_id = ${input.contragentId} AND ${VALID_TODAY}
-     ORDER BY c.valid_from DESC LIMIT 1`);
-  const contract = current.rows[0];
-  return contract
-    ? { check: "NOT_ON_CONTRACT", contractId: contract.id }
-    : { check: "NO_CONTRACT", contractId: null };
+  // Computed by the database, which also checks it on every new job (migration 0018).
+  const { rows } = await db.execute<{ check_result: ContractCheck; contract_id: string | null }>(
+    sql`SELECT check_result, contract_id FROM contract_check(${input.vehicleId}, ${input.contragentId})`,
+  );
+  return { check: rows[0]!.check_result, contractId: rows[0]!.contract_id };
 }

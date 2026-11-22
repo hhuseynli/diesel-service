@@ -1,20 +1,24 @@
 // Plan 01, P10: the tests the document-numbering skill requires.
-import { sql } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { documents } from "@/db/schema";
 import { withActor } from "@/lib/audit";
 import { submitDocument } from "@/lib/documents";
 import { assignNumber } from "@/lib/numbering";
-import { createUser } from "./fixtures";
+import { PREFIXES } from "@/lib/numbering/prefixes";
+import { approveForTest, createUser } from "./fixtures";
 import { draft, sequenceOf } from "./documents-fixtures";
 import { ImmutableError } from "@/lib/db/errors";
 import { asActor, createTestDb, sqlstateOf, SYSTEM_USER_ID, type TestDb } from "./helpers";
 
 let t: TestDb;
 let userId: string;
+let approver: string;
 
 beforeAll(async () => {
   t = await createTestDb();
   userId = await createUser(t.migratorPool, { roles: ["WAREHOUSEMAN"] });
+  approver = await createUser(t.migratorPool, { roles: ["MANAGEMENT"] });
 });
 afterAll(() => t.close());
 
@@ -116,5 +120,49 @@ describe("document_counters guard: numbering does not rest on the app alone", ()
         ),
       ),
     ).toBe("DM005");
+  });
+});
+
+describe("numbers must come from the counter (second verifier pass)", () => {
+  it("lib/numbering prefixes and the database's series_prefix agree", async () => {
+    for (const [series, prefix] of Object.entries(PREFIXES)) {
+      const { rows } = await t.db.execute<{ p: string }>(sql`SELECT series_prefix(${series}) AS p`);
+      expect(rows[0]!.p, series).toBe(prefix);
+    }
+  });
+
+  it("a document cannot take a number under another type's prefix", async () => {
+    const id = await draft(t.db, userId, "QUSUR_AKTI");
+    await expect(
+      withActor(t.db, { userId, reason: "x" }, async (tx) => {
+        const { year, sequence } = await assignNumber(tx, "QUSUR_AKTI");
+        const forged = `EA-${year}-${String(sequence).padStart(6, "0")}`;
+        await tx
+          .update(documents)
+          .set({ status: "SUBMITTED", number: forged })
+          .where(eq(documents.id, id));
+      }),
+    ).rejects.toBeInstanceOf(ImmutableError);
+  });
+
+  it("a corrected version needs an approved predecessor of the same type, with the next version", async () => {
+    const submittedOnly = await draft(t.db, userId, "SATIS");
+    await withActor(t.db, { userId }, (tx) => submitDocument(tx, submittedOnly));
+    const approved = await draft(t.db, userId, "SATIS");
+    await withActor(t.db, { userId }, (tx) => submitDocument(tx, approved));
+    await approveForTest(t.appPool, approver, approved);
+
+    for (const [supersedesId, type, version] of [
+      [submittedOnly, "SATIS", 2],
+      [approved, "QUSUR_AKTI", 2],
+      [approved, "SATIS", 7],
+    ] as const) {
+      await expect(
+        withActor(t.db, { userId }, (tx) =>
+          tx.insert(documents).values({ type, version, supersedesId }),
+        ),
+        `${type} v${version}`,
+      ).rejects.toBeInstanceOf(ImmutableError);
+    }
   });
 });

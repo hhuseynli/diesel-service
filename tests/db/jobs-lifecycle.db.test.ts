@@ -515,3 +515,17 @@ describe("held for management", () => {
     expect(rows).toEqual([{ user_id: formen, reason: "buraxıldı", decision: "SEPARATE_PAID" }]);
   });
 });
+
+describe("concurrent moves", () => {
+  it("two simultaneous moves to the same status: one wins, the other is an error", async () => {
+    const job = await jobAt("HAZIR");
+    const results = await Promise.allSettled([
+      withActor(t.db, { userId: formen }, (tx) => moveJob(tx, job.id, "ODENILDI", "kassa 1")),
+      withActor(t.db, { userId: formen }, (tx) => moveJob(tx, job.id, "ODENILDI", "kassa 2")),
+    ]);
+    expect(results.filter((r) => r.status === "fulfilled")).toHaveLength(1);
+    expect(results.filter((r) => r.status === "rejected")).toHaveLength(1);
+    const paid = (await jobHistory(t.db, job.id)).filter((e) => e.toStatus === "ODENILDI");
+    expect(paid).toHaveLength(1);
+  });
+});
