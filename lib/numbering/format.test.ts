@@ -23,9 +23,10 @@ describe("formatNumber", () => {
 });
 
 describe("PREFIXES", () => {
-  it("gives every document type a unique two-letter prefix", () => {
-    const prefixes = DOC_TYPES.map((t) => PREFIXES[t]);
-    expect(new Set(prefixes).size).toBe(DOC_TYPES.length);
+  it("gives every document type and job orders a unique two-letter prefix", () => {
+    const prefixes = [...DOC_TYPES.map((t) => PREFIXES[t]), PREFIXES.JOB_ORDER];
+    expect(new Set(prefixes).size).toBe(DOC_TYPES.length + 1);
+    expect(formatNumber(PREFIXES.JOB_ORDER, 2026, 1)).toBe("IS-2026-000001");
     for (const p of prefixes) expect(p).toMatch(/^[A-Z]{2}$/);
   });
 });

@@ -9,7 +9,9 @@ import {
   InvalidTransitionError,
   PermissionDeniedError,
 } from "@/lib/db/errors";
+import { addVehicle, createContract } from "@/lib/contracts";
 import { annulDocument, createNewVersion, submitDocument } from "@/lib/documents";
+import { openJob } from "@/lib/jobs";
 import { createVehicle } from "@/lib/vehicles";
 import { approveForTest, createUser } from "./fixtures";
 import { draft, submitted, TWO_LINES } from "./documents-fixtures";
@@ -21,15 +23,27 @@ let approver: string;
 
 beforeAll(async () => {
   t = await createTestDb();
-  creator = await createUser(t.migratorPool, { roles: ["WAREHOUSEMAN"] });
+  creator = await createUser(t.migratorPool, { roles: ["WAREHOUSEMAN", "FORMEN"] });
   approver = await createUser(t.migratorPool, { roles: ["MANAGEMENT"] });
   // At least one row in every table, so row-level delete triggers have something to refuse.
   await withActor(t.db, { userId: creator }, async (tx) => {
-    await createVehicle(tx, {
+    const { id: vehicleId } = await createVehicle(tx, {
       vin: "WDB9634031L000001",
       plate: { display: "90-AA-001", source: "INTAKE" },
     });
-    await tx.insert(contragents).values({ kind: "HUQUQI", name: "Test MMC", isCustomer: true });
+    const [company] = await tx
+      .insert(contragents)
+      .values({ kind: "HUQUQI", name: "Test MMC", isCustomer: true })
+      .returning({ id: contragents.id });
+    // Contract, contract vehicle, job order and its first status event (plan 02).
+    const contractId = await createContract(tx, {
+      contragentId: company!.id,
+      number: "M-1",
+      signedOn: "2026-01-01",
+      validFrom: "2026-01-01",
+    });
+    await addVehicle(tx, contractId, vehicleId);
+    await openJob(tx, { vehicleId, contragentId: company!.id, formenId: creator });
     await tx.insert(attachments).values({
       storageKey: "photos/test-1.jpg",
       sha256: "a".repeat(64),

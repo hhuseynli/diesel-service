@@ -5,6 +5,7 @@ import { createTestDb, type TestDb } from "./helpers";
 
 let t: TestDb;
 let tables: string[];
+const APPEND_ONLY = ["audit_log", "job_status_events"];
 
 beforeAll(async () => {
   t = await createTestDb();
@@ -40,14 +41,18 @@ describe("catalog", () => {
     expect(rows[0].current_user).toBe("diesel_app");
   });
 
-  it("has the eleven core tables", () => {
+  it("has the core, job order and contract tables", () => {
     expect(tables).toEqual([
       "attachments",
       "audit_log",
+      "contract_vehicles",
+      "contracts",
       "contragents",
       "document_counters",
       "document_lines",
       "documents",
+      "job_orders",
+      "job_status_events",
       "settings",
       "user_roles",
       "users",
@@ -63,16 +68,18 @@ describe("catalog", () => {
     }
   });
 
-  it("audit_log is SELECT only and attachments are never updated by the app role", async () => {
-    expect(await appHas("audit_log", "SELECT")).toBe(true);
-    expect(await appHas("audit_log", "INSERT")).toBe(false);
-    expect(await appHas("audit_log", "UPDATE")).toBe(false);
+  it("audit_log and job_status_events are SELECT only; attachments are never updated", async () => {
+    for (const table of ["audit_log", "job_status_events"]) {
+      expect(await appHas(table, "SELECT"), table).toBe(true);
+      expect(await appHas(table, "INSERT"), table).toBe(false);
+      expect(await appHas(table, "UPDATE"), table).toBe(false);
+    }
     expect(await appHas("attachments", "UPDATE")).toBe(false);
     expect(await appHas("settings", "UPDATE")).toBe(false);
     const { rows } = await t.migratorPool.query(
       `SELECT table_name, column_name FROM information_schema.column_privileges
         WHERE grantee = 'diesel_app' AND privilege_type = 'UPDATE'
-          AND table_name IN ('audit_log', 'attachments', 'settings')`,
+          AND table_name IN ('audit_log', 'job_status_events', 'attachments', 'settings')`,
     );
     expect(rows).toEqual([]);
   });
@@ -97,8 +104,9 @@ describe("catalog", () => {
   it("every table stamps created_* and every business table is audited", async () => {
     for (const table of tables) {
       const triggers = await triggersOf(table);
-      if (table !== "audit_log") expect(triggers, table).toContain("stamp_created");
-      if (!["audit_log", "document_counters"].includes(table)) {
+      // Append-only logs have `at` instead of created_*; counters are not audited.
+      if (!APPEND_ONLY.includes(table)) expect(triggers, table).toContain("stamp_created");
+      if (![...APPEND_ONLY, "document_counters"].includes(table)) {
         expect(triggers, table).toContain("audit_row");
       }
     }
@@ -110,6 +118,19 @@ describe("catalog", () => {
     expect(await triggersOf("audit_log")).toContain("forbid_update");
     expect(await triggersOf("attachments")).toContain("forbid_update");
     expect(await triggersOf("document_counters")).toContain("document_counters_guard");
+    expect(await triggersOf("job_status_events")).toEqual(
+      expect.arrayContaining(["forbid_update", "job_status_events_from_trigger"]),
+    );
+    expect(await triggersOf("job_orders")).toEqual(
+      expect.arrayContaining([
+        "job_orders_guard",
+        "job_status_event_insert",
+        "job_status_event_update",
+      ]),
+    );
+    expect(await triggersOf("contracts")).toContain("contracts_guard");
+    expect(await triggersOf("contract_vehicles")).toContain("contract_vehicles_guard");
+    expect(await triggersOf("documents")).toContain("documents_job_vehicle");
   });
 
   it("every SECURITY DEFINER function pins its search_path", async () => {
@@ -118,7 +139,11 @@ describe("catalog", () => {
          JOIN pg_namespace n ON n.oid = p.pronamespace
         WHERE n.nspname = 'public' AND p.prosecdef`,
     );
-    expect(rows.map((r) => r.proname).sort()).toEqual(["audit_row", "log_denied"]);
+    expect(rows.map((r) => r.proname).sort()).toEqual([
+      "audit_row",
+      "job_status_event",
+      "log_denied",
+    ]);
     for (const r of rows) {
       expect(
         r.proconfig?.some((c) => c.startsWith("search_path=")),

@@ -8,8 +8,10 @@ import {
   text,
   uniqueIndex,
   uuid,
+  type AnyPgColumn,
 } from "drizzle-orm/pg-core";
 import { createdAt, id } from "./columns";
+import { jobOrders } from "./jobs";
 import { createdBy } from "./people";
 
 // A vehicle is its VIN (spec 00, section 3a; R25). The check digit is not enforced (plan 01, F7).
@@ -55,8 +57,7 @@ export const vehiclePlates = pgTable(
     validTo: date("valid_to"),
     status: text("status").notNull(),
     source: text("source").notNull(),
-    // Foreign key added with job_orders in milestone 2.
-    jobOrderId: uuid("job_order_id"),
+    jobOrderId: uuid("job_order_id").references((): AnyPgColumn => jobOrders.id),
     createdAt: createdAt(),
     createdBy: createdBy(),
   },
