@@ -4,7 +4,9 @@ import { createdAt, id } from "./columns";
 import { createdBy, users } from "./people";
 
 // Operational tables for sign-in (plan 03, A7-A9). Not audited: last_seen_at changes on
-// every request. What matters (sign-ins, failures, unlocks) is in login_attempts.
+// every request. What matters (sign-ins, failures, unlocks) is in login_attempts, and an
+// account's lock is computed from it: five failures in a row since the last success or
+// unlock (no column to race on, and the lock is nobody's action).
 
 /** A registered shared tablet. Its long-lived device cookie holds the token. */
 export const tabletDevices = pgTable("tablet_devices", {
@@ -50,11 +52,18 @@ export const loginAttempts = pgTable(
     success: boolean("success").notNull(),
     deviceId: uuid("device_id").references(() => tabletDevices.id),
     at: timestamp("at", { withTimezone: true }).notNull().defaultNow(),
+    // UNLOCK only: the manager who lifted the lock, and why (plan 03, A7).
+    recordedBy: uuid("recorded_by").references(() => users.id),
+    reason: text("reason"),
   },
   (t) => [
     check(
       "login_attempts_kind",
       sql`${t.kind} IN ('PIN', 'PASSWORD', 'TOTP', 'UNLOCK', 'SIGN_OUT')`,
+    ),
+    check(
+      "login_attempts_unlock",
+      sql`(${t.kind} = 'UNLOCK') = (${t.recordedBy} IS NOT NULL AND btrim(coalesce(${t.reason}, '')) <> '')`,
     ),
   ],
 );

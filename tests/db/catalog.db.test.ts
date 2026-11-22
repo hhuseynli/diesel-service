@@ -139,6 +139,12 @@ describe("catalog", () => {
     expect(await triggersOf("contracts")).toContain("contracts_guard");
     expect(await triggersOf("contract_vehicles")).toContain("contract_vehicles_guard");
     expect(await triggersOf("documents")).toContain("documents_job_vehicle");
+    expect(await triggersOf("approvals")).toContain("approvals_guard");
+    expect(await triggersOf("sessions")).toContain("sessions_guard");
+    expect(await triggersOf("tablet_devices")).toContain("tablet_devices_guard");
+    expect(await triggersOf("login_attempts")).toEqual(
+      expect.arrayContaining(["login_attempts_guard", "forbid_update"]),
+    );
   });
 
   it("every SECURITY DEFINER function pins its search_path", async () => {

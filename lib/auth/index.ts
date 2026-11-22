@@ -3,6 +3,7 @@ import { loginAttempts, sessions, tabletDevices, users } from "@/db/schema";
 import { withActor, withReason } from "@/lib/audit";
 import type { Db, Tx } from "@/lib/db/types";
 import { requirePermission } from "@/lib/permissions";
+import type { Role } from "@/lib/users/roles";
 import {
   decryptSecret,
   encryptSecret,
@@ -23,11 +24,25 @@ export const MAX_FAILURES = 5;
 const OFFICE_SESSION_HOURS = 12;
 const TABLET_SESSION_HOURS = 12;
 const DEFAULT_IDLE_SECONDS = 300;
-const TOTP_ROLES = ["MANAGEMENT", "OWNER"];
 
+/** Roles whose accounts need the second factor, so never sign in with a PIN alone. */
+const TOTP_ROLES: Role[] = ["MANAGEMENT", "OWNER"];
+/** Roles that may sign in at all; mechanics have no login yet (R3). */
+const SIGN_IN_ROLES: Role[] = [
+  "OWNER",
+  "MANAGEMENT",
+  "FORMEN",
+  "WAREHOUSEMAN",
+  "CASHIER",
+  "BOOKKEEPER",
+];
+/** Attempt kinds that count towards (and reset) the lock. */
+const CREDENTIAL_KINDS = ["PIN", "PASSWORD", "TOTP"] as const;
+
+export type SignInStatus =
+  "INVALID" | "LOCKED" | "TOTP_REQUIRED" | "TOTP_NOT_ENROLLED" | "UNKNOWN_DEVICE" | "NOT_ALLOWED";
 export type SignInResult =
-  | { status: "OK"; token: string; userId: string }
-  | { status: "INVALID" | "LOCKED" | "TOTP_REQUIRED" | "TOTP_NOT_ENROLLED" | "UNKNOWN_DEVICE" };
+  { status: "OK"; token: string; userId: string } | { status: SignInStatus };
 
 // --- Setting credentials ---------------------------------------------------------
 
@@ -72,74 +87,106 @@ export async function enableTotp(tx: Tx, userId: string): Promise<string> {
   return secret;
 }
 
-/** Lifts a lock after repeated wrong PINs or passwords (management or owner). */
+/** Lifts a lock: recorded with the manager who did it and why (plan 03, A7). */
 export async function unlockUser(tx: Tx, userId: string, reason: string): Promise<void> {
   if (reason.trim() === "") throw new Error("Unlocking needs a reason");
   await requirePermission(tx, "UNLOCK_USER");
-  await withReason(tx, reason, () =>
-    tx.update(users).set({ lockedAt: null, lockReason: null }).where(eq(users.id, userId)),
-  );
-  await tx.insert(loginAttempts).values({ userId, kind: "UNLOCK", success: true });
+  await tx.insert(loginAttempts).values({
+    userId,
+    kind: "UNLOCK",
+    success: true,
+    recordedBy: sql`current_actor()`,
+    reason: reason.trim(),
+  });
+}
+
+/**
+ * Locked: MAX_FAILURES failed PIN, password or TOTP attempts in a row since the last
+ * successful one or the last unlock. Computed from login_attempts, never stored.
+ */
+export async function isLocked(db: Db | Tx, userId: string): Promise<boolean> {
+  const { rows } = await db.execute<{ n: number }>(sql`
+    SELECT count(*)::int AS n FROM login_attempts a
+     WHERE a.user_id = ${userId} AND NOT a.success
+       AND a.kind IN ('PIN', 'PASSWORD', 'TOTP')
+       AND a.at > coalesce((SELECT max(b.at) FROM login_attempts b
+                             WHERE b.user_id = ${userId} AND b.success
+                               AND b.kind IN ('PIN', 'PASSWORD', 'TOTP', 'UNLOCK')), '-infinity')`);
+  return rows[0]!.n >= MAX_FAILURES;
 }
 
 // --- Sign-in ----------------------------------------------------------------------
 
-async function failuresSinceLastSuccess(db: Db, userId: string): Promise<number> {
-  const { rows } = await db.execute<{ n: number }>(sql`
-    SELECT count(*)::int AS n FROM login_attempts a
-     WHERE a.user_id = ${userId} AND NOT a.success
-       AND a.at > coalesce((SELECT max(b.at) FROM login_attempts b
-                             WHERE b.user_id = ${userId} AND b.success), '-infinity')`);
-  return rows[0]!.n;
+async function rolesOf(db: Db | Tx, userId: string): Promise<Role[]> {
+  const { rows } = await db.execute<{ role: Role }>(
+    sql`SELECT role FROM user_roles WHERE user_id = ${userId} AND revoked_at IS NULL`,
+  );
+  return rows.map((r) => r.role);
 }
 
-/** Records a failed attempt; the fifth in a row locks the account (plan 03, A7). */
-async function recordFailure(
+async function deviceFor(
+  db: Db | Tx,
+  deviceToken: string | undefined,
+): Promise<string | undefined> {
+  if (!deviceToken) return undefined;
+  const [device] = await db
+    .select({ id: tabletDevices.id })
+    .from(tabletDevices)
+    .where(
+      and(eq(tabletDevices.tokenHash, hashToken(deviceToken)), isNull(tabletDevices.revokedAt)),
+    );
+  return device?.id;
+}
+
+/**
+ * Runs one sign-in attempt for a user: serialized per user (an advisory lock), so a burst
+ * of parallel guesses cannot all be checked before the lock applies (plan 03, A7).
+ */
+async function attempt(
   db: Db,
   userId: string,
-  kind: "PIN" | "PASSWORD" | "TOTP",
-  deviceId?: string,
-): Promise<"INVALID" | "LOCKED"> {
-  await db.insert(loginAttempts).values({ userId, kind, success: false, deviceId });
-  if ((await failuresSinceLastSuccess(db, userId)) < MAX_FAILURES) return "INVALID";
-  await withActor(db, { userId, reason: "audit.lockedAfterFailures" }, (tx) =>
-    tx
-      .update(users)
-      .set({ lockedAt: sql`now()`, lockReason: `${MAX_FAILURES} wrong attempts in a row` })
-      .where(and(eq(users.id, userId), isNull(users.lockedAt))),
-  );
-  return "LOCKED";
+  // The check may change the kind, e.g. a right password but a wrong TOTP code.
+  kind: { value: (typeof CREDENTIAL_KINDS)[number] },
+  deviceId: string | undefined,
+  check: (tx: Tx) => Promise<SignInStatus | "OK">,
+  startAs?: "OFFICE" | "TABLET",
+): Promise<SignInResult> {
+  return withActor(db, { userId }, async (tx) => {
+    await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtextextended(${userId}, 0))`);
+    if (await isLocked(tx, userId)) return { status: "LOCKED" } as const;
+    const outcome = await check(tx);
+    if (outcome === "INVALID") {
+      await tx.insert(loginAttempts).values({ userId, kind: kind.value, success: false, deviceId });
+      return { status: (await isLocked(tx, userId)) ? "LOCKED" : "INVALID" } as const;
+    }
+    if (outcome !== "OK") return { status: outcome } as const;
+    await tx.insert(loginAttempts).values({ userId, kind: kind.value, success: true, deviceId });
+    const token = await startSession(tx, userId, startAs ?? "OFFICE", deviceId);
+    return { status: "OK", token, userId } as const;
+  });
 }
 
 async function startSession(
-  db: Db,
+  tx: Tx,
   userId: string,
   kind: "OFFICE" | "TABLET",
   deviceId?: string,
 ): Promise<string> {
   const token = newToken();
   const hours = kind === "OFFICE" ? OFFICE_SESSION_HOURS : TABLET_SESSION_HOURS;
-  await withActor(db, { userId }, async (tx) => {
-    if (deviceId) {
-      // Switching user on the tablet ends whoever was signed in there.
-      await tx
-        .update(sessions)
-        .set({ endedAt: sql`now()`, endReason: "SWITCH_USER" })
-        .where(and(eq(sessions.deviceId, deviceId), isNull(sessions.endedAt)));
-    }
-    await tx.insert(sessions).values({
-      userId,
-      tokenHash: hashToken(token),
-      kind,
-      deviceId,
-      expiresAt: sql`now() + make_interval(hours => ${hours})`,
-    });
-    await tx.insert(loginAttempts).values({
-      userId,
-      kind: kind === "OFFICE" ? "PASSWORD" : "PIN",
-      success: true,
-      deviceId,
-    });
+  if (deviceId) {
+    // Switching user on the tablet ends whoever was signed in there.
+    await tx
+      .update(sessions)
+      .set({ endedAt: sql`now()`, endReason: "SWITCH_USER" })
+      .where(and(eq(sessions.deviceId, deviceId), isNull(sessions.endedAt)));
+  }
+  await tx.insert(sessions).values({
+    userId,
+    tokenHash: hashToken(token),
+    kind,
+    deviceId,
+    expiresAt: sql`now() + make_interval(hours => ${hours})`,
   });
   return token;
 }
@@ -151,7 +198,6 @@ async function activeUser(db: Db, where: ReturnType<typeof eq>) {
       passwordHash: users.passwordHash,
       pinHash: users.pinHash,
       totpSecretEnc: users.totpSecretEnc,
-      lockedAt: users.lockedAt,
       isActive: users.isActive,
     })
     .from(users)
@@ -159,71 +205,94 @@ async function activeUser(db: Db, where: ReturnType<typeof eq>) {
   return user && user.isActive ? user : undefined;
 }
 
-async function rolesOf(db: Db, userId: string): Promise<string[]> {
-  const { rows } = await db.execute<{ role: string }>(
-    sql`SELECT role FROM user_roles WHERE user_id = ${userId} AND revoked_at IS NULL`,
-  );
-  return rows.map((r) => r.role);
-}
-
-/** Office sign-in: phone and password, then a TOTP code for management and the owner. */
+/**
+ * Office sign-in: phone and password, then a TOTP code for management and the owner.
+ * On a registered tablet the session is a tablet session, with its idle lock.
+ */
 export async function signInWithPassword(
   db: Db,
-  input: { phone: string; password: string; totpCode?: string },
+  input: { phone: string; password: string; totpCode?: string; deviceToken?: string },
 ): Promise<SignInResult> {
   const user = await activeUser(db, eq(users.phone, input.phone.trim()));
   if (!user?.passwordHash) {
     await db.insert(loginAttempts).values({ kind: "PASSWORD", success: false });
     return { status: "INVALID" };
   }
-  if (user.lockedAt) return { status: "LOCKED" };
-  if (!verifySecret(input.password, user.passwordHash)) {
-    return { status: await recordFailure(db, user.id, "PASSWORD") };
-  }
-
   const roles = await rolesOf(db, user.id);
-  if (roles.some((r) => TOTP_ROLES.includes(r))) {
-    if (!user.totpSecretEnc) return { status: "TOTP_NOT_ENROLLED" };
-    if (!input.totpCode) return { status: "TOTP_REQUIRED" };
-    const { rows } = await db.execute<{ t: number }>(
-      sql`SELECT extract(epoch FROM now())::bigint AS t`,
-    );
-    if (!verifyTotp(decryptSecret(user.totpSecretEnc), input.totpCode, Number(rows[0]!.t))) {
-      return { status: await recordFailure(db, user.id, "TOTP") };
-    }
-  }
-  return { status: "OK", userId: user.id, token: await startSession(db, user.id, "OFFICE") };
+  if (!roles.some((r) => SIGN_IN_ROLES.includes(r))) return { status: "NOT_ALLOWED" };
+  const deviceId = await deviceFor(db, input.deviceToken);
+  const needsTotp = roles.some((r) => TOTP_ROLES.includes(r));
+
+  const kind: { value: (typeof CREDENTIAL_KINDS)[number] } = { value: "PASSWORD" };
+  return attempt(
+    db,
+    user.id,
+    kind,
+    deviceId,
+    async (tx) => {
+      if (!verifySecret(input.password, user.passwordHash!)) return "INVALID";
+      if (!needsTotp) return "OK";
+      if (!user.totpSecretEnc) return "TOTP_NOT_ENROLLED";
+      if (!input.totpCode) return "TOTP_REQUIRED";
+      const { rows } = await tx.execute<{ t: string }>(
+        sql`SELECT extract(epoch FROM now())::bigint AS t`,
+      );
+      if (verifyTotp(decryptSecret(user.totpSecretEnc), input.totpCode, Number(rows[0]!.t))) {
+        return "OK";
+      }
+      // A wrong code is recorded as TOTP; it counts towards the lock like a password.
+      kind.value = "TOTP";
+      return "INVALID";
+    },
+    deviceId ? "TABLET" : "OFFICE",
+  );
 }
 
-/** Tablet: switch in with a personal PIN on a registered device (spec 01, section 1). */
+/**
+ * Tablet: switch in with a personal PIN on a registered device (spec 01, section 1).
+ * Management and the owner need their second factor, so they never sign in by PIN.
+ */
 export async function signInWithPin(
   db: Db,
   input: { deviceToken: string; userId: string; pin: string },
 ): Promise<SignInResult> {
-  const [device] = await db
-    .select({ id: tabletDevices.id })
-    .from(tabletDevices)
-    .where(
-      and(
-        eq(tabletDevices.tokenHash, hashToken(input.deviceToken)),
-        isNull(tabletDevices.revokedAt),
-      ),
-    );
-  if (!device) return { status: "UNKNOWN_DEVICE" };
+  const deviceId = await deviceFor(db, input.deviceToken);
+  if (!deviceId) return { status: "UNKNOWN_DEVICE" };
   const user = await activeUser(db, eq(users.id, input.userId));
   if (!user?.pinHash) {
-    await db.insert(loginAttempts).values({ kind: "PIN", success: false, deviceId: device.id });
+    await db.insert(loginAttempts).values({ kind: "PIN", success: false, deviceId });
     return { status: "INVALID" };
   }
-  if (user.lockedAt) return { status: "LOCKED" };
-  if (!verifySecret(input.pin, user.pinHash)) {
-    return { status: await recordFailure(db, user.id, "PIN", device.id) };
-  }
-  return {
-    status: "OK",
-    userId: user.id,
-    token: await startSession(db, user.id, "TABLET", device.id),
-  };
+  if (!(await pinAllowed(db, user.id))) return { status: "NOT_ALLOWED" };
+  return attempt(
+    db,
+    user.id,
+    { value: "PIN" },
+    deviceId,
+    async () => (verifySecret(input.pin, user.pinHash!) ? "OK" : "INVALID"),
+    "TABLET",
+  );
+}
+
+/** May sign in by PIN: a staff role that needs no second factor (not mechanic only). */
+export async function pinAllowed(db: Db | Tx, userId: string): Promise<boolean> {
+  const roles = await rolesOf(db, userId);
+  return roles.some((r) => SIGN_IN_ROLES.includes(r)) && !roles.some((r) => TOTP_ROLES.includes(r));
+}
+
+/** The people who can switch in on the tablet: active, with a PIN, allowed, not locked. */
+export async function pinCandidates(db: Db): Promise<{ id: string; name: string }[]> {
+  const { rows } = await db.execute<{ id: string; name: string }>(sql`
+    SELECT u.id, u.full_name AS name FROM users u
+     WHERE u.is_active AND u.pin_hash IS NOT NULL
+       AND EXISTS (SELECT 1 FROM user_roles r WHERE r.user_id = u.id AND r.revoked_at IS NULL
+                     AND r.role IN ('FORMEN', 'WAREHOUSEMAN', 'CASHIER', 'BOOKKEEPER'))
+       AND NOT EXISTS (SELECT 1 FROM user_roles r WHERE r.user_id = u.id AND r.revoked_at IS NULL
+                         AND r.role IN ('MANAGEMENT', 'OWNER'))
+     ORDER BY u.full_name`);
+  const result: { id: string; name: string }[] = [];
+  for (const row of rows) if (!(await isLocked(db, row.id))) result.push(row);
+  return result;
 }
 
 export interface SessionUser {
@@ -234,16 +303,22 @@ export interface SessionUser {
 
 /**
  * The signed-in user for a session token, or null. Ended, expired, idle (tablet),
- * deactivated or locked sessions are ended here and refused (R11).
+ * deactivated or locked users' sessions are ended here and refused (R11). A tablet
+ * session only works on its own registered, unrevoked tablet.
  */
-export async function validateSession(db: Db, token: string): Promise<SessionUser | null> {
+export async function validateSession(
+  db: Db,
+  token: string,
+  deviceToken?: string,
+): Promise<SessionUser | null> {
   const { rows } = await db.execute<{
     id: string;
     user_id: string;
     kind: "OFFICE" | "TABLET";
     expired: boolean;
     idle: boolean;
-    usable: boolean;
+    active: boolean;
+    wrong_device: boolean;
   }>(sql`
     SELECT s.id, s.user_id, s.kind,
            s.expires_at <= now() AS expired,
@@ -252,18 +327,27 @@ export async function validateSession(db: Db, token: string): Promise<SessionUse
                 SELECT (value #>> '{}')::int FROM settings
                  WHERE key = 'tablet_idle_seconds' AND effective_from <= now()
                  ORDER BY effective_from DESC LIMIT 1), ${DEFAULT_IDLE_SECONDS}))) AS idle,
-           (u.is_active AND u.locked_at IS NULL) AS usable
+           u.is_active AS active,
+           (s.kind = 'TABLET' AND NOT EXISTS (
+              SELECT 1 FROM tablet_devices d
+               WHERE d.id = s.device_id AND d.revoked_at IS NULL
+                 AND d.token_hash = ${deviceToken ? hashToken(deviceToken) : ""})) AS wrong_device
       FROM sessions s JOIN users u ON u.id = s.user_id
      WHERE s.token_hash = ${hashToken(token)} AND s.ended_at IS NULL`);
   const s = rows[0];
   if (!s) return null;
+  const locked = s.active && (await isLocked(db, s.user_id));
   const endReason = s.expired
     ? "EXPIRED"
     : s.idle
       ? "IDLE_LOCK"
-      : !s.usable
-        ? "USER_BLOCKED"
-        : null;
+      : s.wrong_device
+        ? "WRONG_DEVICE"
+        : !s.active
+          ? "USER_DEACTIVATED"
+          : locked
+            ? "USER_LOCKED"
+            : null;
   const touch = withActor(db, { userId: s.user_id }, (tx) =>
     tx
       .update(sessions)
@@ -272,9 +356,26 @@ export async function validateSession(db: Db, token: string): Promise<SessionUse
   );
   // A deactivated user cannot act, so their session cannot be ended in their name;
   // it is refused here every time instead.
-  if (endReason === "USER_BLOCKED") await touch.catch(() => undefined);
+  if (endReason === "USER_DEACTIVATED") await touch.catch(() => undefined);
   else await touch;
   return endReason ? null : { sessionId: s.id, userId: s.user_id, kind: s.kind };
+}
+
+export class NotSignedInError extends Error {}
+
+/**
+ * Runs fn as the session's user, in one audited transaction (AC5). The actor comes from
+ * the server-side session, never from the request body.
+ */
+export async function withSessionUser<T>(
+  db: Db,
+  session: { token: string | undefined; deviceToken?: string },
+  fn: (tx: Tx, user: SessionUser) => Promise<T>,
+  reason?: string,
+): Promise<T> {
+  const user = session.token ? await validateSession(db, session.token, session.deviceToken) : null;
+  if (!user) throw new NotSignedInError("Not signed in");
+  return withActor(db, { userId: user.userId, reason }, (tx) => fn(tx, user));
 }
 
 export async function signOut(db: Db, token: string): Promise<void> {
@@ -295,7 +396,19 @@ export async function signOut(db: Db, token: string): Promise<void> {
 /** Registers a shared tablet; returns the device token for its long-lived cookie. */
 export async function registerTablet(tx: Tx, name: string): Promise<string> {
   await requirePermission(tx, "REGISTER_TABLET");
+  if (name.trim() === "") throw new Error("A tablet needs a name");
   const token = newToken();
   await tx.insert(tabletDevices).values({ name: name.trim(), tokenHash: hashToken(token) });
   return token;
+}
+
+/** Revokes a tablet; its sessions are refused from the next request (WRONG_DEVICE). */
+export async function revokeTablet(tx: Tx, deviceId: string): Promise<void> {
+  await requirePermission(tx, "REGISTER_TABLET");
+  await withReason(tx, "audit.tabletRevoked", () =>
+    tx
+      .update(tabletDevices)
+      .set({ revokedAt: sql`now()` })
+      .where(eq(tabletDevices.id, deviceId)),
+  );
 }

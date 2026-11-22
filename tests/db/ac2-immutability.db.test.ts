@@ -54,11 +54,13 @@ beforeAll(async () => {
   });
   await approvedDoc();
   // Sign-in tables (plan 03): a registered tablet, a PIN sign-in (session + attempt).
-  const deviceToken = await withActor(t.db, { userId: creator }, async (tx) => {
-    await setPin(tx, creator, "4821");
-    return registerTablet(tx, "Sex planşeti");
-  });
-  await signInWithPin(t.db, { deviceToken, userId: creator, pin: "4821" });
+  const formen = await createUser(t.migratorPool, { roles: ["FORMEN"] });
+  await withActor(t.db, { userId: formen }, (tx) => setPin(tx, formen, "4821"));
+  const deviceToken = await withActor(t.db, { userId: creator }, (tx) =>
+    registerTablet(tx, "Sex planşeti"),
+  );
+  const pin = await signInWithPin(t.db, { deviceToken, userId: formen, pin: "4821" });
+  if (pin.status !== "OK") throw new Error(`PIN sign-in failed: ${pin.status}`);
 });
 afterAll(() => t.close());
 

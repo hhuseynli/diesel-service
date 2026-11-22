@@ -26,7 +26,8 @@
     "documentApproved": "Sənəd təsdiqləndi",
     "documentSubmitted": "Sənəd təqdim edildi",
     "documentAnnulled": "Sənəd ləğv edildi",
-    "documentPosted": "Sənəd qeydə alındı"
+    "documentPosted": "Sənəd qeydə alındı",
+    "tabletRevoked": "Planşet qeydiyyatdan çıxarıldı"
   },
   "auth": {
     "signInTitle": "Ofis girişi",
@@ -44,7 +45,8 @@
       "LOCKED": "Hesab bloklanıb. Rəhbərliyə müraciət edin.",
       "TOTP_REQUIRED": "Təsdiq kodunu daxil edin.",
       "TOTP_NOT_ENROLLED": "İkiaddımlı təsdiq qoşulmayıb. Sahibkara müraciət edin.",
-      "UNKNOWN_DEVICE": "Bu cihaz planşet kimi qeydiyyatda deyil."
+      "UNKNOWN_DEVICE": "Bu cihaz planşet kimi qeydiyyatda deyil.",
+      "NOT_ALLOWED": "Bu hesabla buradan daxil olmaq olmaz."
     }
   },
   "roles": {

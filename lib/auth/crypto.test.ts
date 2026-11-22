@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  authSecret,
   base32Decode,
   base32Encode,
   decryptSecret,
@@ -76,5 +77,43 @@ describe("hashToken", () => {
     expect(hashToken("abc")).toBe(hashToken("abc"));
     expect(hashToken("abc")).toMatch(/^[0-9a-f]{64}$/);
     expect(hashToken("abc")).not.toBe(hashToken("abd"));
+  });
+});
+
+describe("AUTH_SECRET", () => {
+  it("the pepper matters: a hash made under one secret fails under another", () => {
+    const original = process.env.AUTH_SECRET;
+    try {
+      process.env.AUTH_SECRET = Buffer.alloc(32, 1).toString("base64");
+      const stored = hashSecret("4821");
+      expect(verifySecret("4821", stored)).toBe(true);
+      process.env.AUTH_SECRET = Buffer.alloc(32, 2).toString("base64");
+      expect(verifySecret("4821", stored)).toBe(false);
+    } finally {
+      if (original === undefined) delete process.env.AUTH_SECRET;
+      else process.env.AUTH_SECRET = original;
+    }
+  });
+
+  it("refuses a short secret, and production without one", () => {
+    const original = { secret: process.env.AUTH_SECRET, env: process.env.NODE_ENV };
+    const env = process.env as Record<string, string | undefined>;
+    try {
+      env.AUTH_SECRET = Buffer.alloc(16).toString("base64");
+      expect(() => authSecret()).toThrow(/32 bytes/);
+      delete env.AUTH_SECRET;
+      env.NODE_ENV = "production";
+      expect(() => authSecret()).toThrow(/not set/);
+    } finally {
+      env.AUTH_SECRET = original.secret;
+      if (original.secret === undefined) delete env.AUTH_SECRET;
+      env.NODE_ENV = original.env;
+    }
+  });
+
+  it("accepts a TOTP code one step early as well as late", () => {
+    const secret = Buffer.from("12345678901234567890", "ascii");
+    const now = 1_800_000_000;
+    expect(verifyTotp(base32Encode(secret), totp(secret, now), now - 30)).toBe(true);
   });
 });

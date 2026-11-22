@@ -185,15 +185,15 @@ export async function annulDocument(tx: Tx, documentId: string, reason: string):
   if (!doc) throw new Error(`Document ${documentId} not found`);
   await requirePermission(tx, documentAction(doc.type as DocType));
   await withReason(tx, reason, async () => {
-    // Open approval steps end with the document.
-    await tx
-      .update(approvals)
-      .set({ status: "CANCELLED" })
-      .where(and(eq(approvals.documentId, documentId), eq(approvals.status, "PENDING")));
     await tx
       .update(documents)
       .set({ status: "ANNULLED", annulReason: reason })
       .where(eq(documents.id, documentId));
+    // Open approval steps end with the document (allowed once it has left SUBMITTED).
+    await tx
+      .update(approvals)
+      .set({ status: "CANCELLED" })
+      .where(and(eq(approvals.documentId, documentId), eq(approvals.status, "PENDING")));
   });
 }
 

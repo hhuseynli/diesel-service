@@ -1,7 +1,7 @@
-import { and, asc, eq, isNotNull, isNull } from "drizzle-orm";
 import { getTranslations } from "next-intl/server";
+import { signInError } from "../sign-in-errors";
 import Link from "next/link";
-import { users } from "@/db/schema";
+import { pinCandidates } from "@/lib/auth";
 import { getDeviceToken } from "@/lib/auth/context";
 import { getDb } from "@/lib/db/client";
 import { pinAction } from "../actions";
@@ -9,7 +9,7 @@ import { pinAction } from "../actions";
 // The shared tablet: pick yourself, enter your PIN (spec 01, section 1).
 export default async function PinPage({ searchParams }: { searchParams: Promise<{ e?: string }> }) {
   const t = await getTranslations("auth");
-  const { e } = await searchParams;
+  const error = signInError((await searchParams).e);
   if (!(await getDeviceToken())) {
     return (
       <main>
@@ -19,15 +19,11 @@ export default async function PinPage({ searchParams }: { searchParams: Promise<
       </main>
     );
   }
-  const staff = await getDb()
-    .select({ id: users.id, name: users.fullName })
-    .from(users)
-    .where(and(eq(users.isActive, true), isNotNull(users.pinHash), isNull(users.lockedAt)))
-    .orderBy(asc(users.fullName));
+  const staff = await pinCandidates(getDb());
   return (
     <main>
       <h1>{t("pinTitle")}</h1>
-      {e && <p role="alert">{t(`errors.${e}` as "errors.INVALID")}</p>}
+      {error && <p role="alert">{t(`errors.${error}`)}</p>}
       <form action={pinAction}>
         <label>
           {t("who")}

@@ -13,11 +13,20 @@ import {
 // Development only: tests and `pnpm dev` work without AUTH_SECRET (plan 03, A10).
 const DEV_SECRET = "diesel-service-development-secret-not-for-production";
 
-function authSecret(): Buffer {
+/**
+ * AUTH_SECRET: at least 32 random bytes, base64 (plan 03, A10). It keys the pepper, the
+ * token hashes and the TOTP encryption, so changing it invalidates every PIN, password,
+ * session, tablet registration and TOTP enrolment.
+ */
+export function authSecret(): Buffer {
   const secret = process.env.AUTH_SECRET;
-  if (secret) return Buffer.from(secret, "utf8");
-  if (process.env.NODE_ENV === "production") throw new Error("AUTH_SECRET is not set");
-  return Buffer.from(DEV_SECRET, "utf8");
+  if (!secret) {
+    if (process.env.NODE_ENV === "production") throw new Error("AUTH_SECRET is not set");
+    return Buffer.from(DEV_SECRET, "utf8");
+  }
+  const bytes = Buffer.from(secret, "base64");
+  if (bytes.length < 32) throw new Error("AUTH_SECRET must be at least 32 bytes, base64-encoded");
+  return bytes;
 }
 
 function derivedKey(purpose: string): Buffer {

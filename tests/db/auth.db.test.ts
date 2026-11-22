@@ -55,11 +55,14 @@ describe("tablet PIN", () => {
     const first = await signInWithPin(t.db, { deviceToken, userId: a.id, pin: "4821" });
     expect(first.status).toBe("OK");
     const firstToken = (first as { token: string }).token;
-    expect(await validateSession(t.db, firstToken)).toMatchObject({ userId: a.id, kind: "TABLET" });
+    expect(await validateSession(t.db, firstToken, deviceToken)).toMatchObject({
+      userId: a.id,
+      kind: "TABLET",
+    });
 
     const second = await signInWithPin(t.db, { deviceToken, userId: b.id, pin: "7310" });
     expect(second.status).toBe("OK");
-    expect(await validateSession(t.db, firstToken)).toBeNull();
+    expect(await validateSession(t.db, firstToken, deviceToken)).toBeNull();
     const [ended] = await t.db
       .select()
       .from(sessions)
@@ -116,9 +119,9 @@ describe("tablet PIN", () => {
     const a = await staff(["FORMEN"], { pin: "8642" });
     const r = await signInWithPin(t.db, { deviceToken, userId: a.id, pin: "8642" });
     const token = (r as { token: string }).token;
-    expect(await validateSession(t.db, token)).not.toBeNull();
+    expect(await validateSession(t.db, token, deviceToken)).not.toBeNull();
     await new Promise((resolve) => setTimeout(resolve, 2100));
-    expect(await validateSession(t.db, token)).toBeNull();
+    expect(await validateSession(t.db, token, deviceToken)).toBeNull();
     const [s] = await t.db
       .select()
       .from(sessions)

@@ -123,6 +123,9 @@ The screens in this milestone are the minimum: sign-in, PIN switch and a signed-
 | F27 | §6 client approval | Moves to milestone 6 together with message delivery (A1). |
 | F28 | §6 TEHVIL_TESLIM has no approval step | It is signed on screen. A type with an empty rule is approved at submission. |
 | F29 | §10 matrix rows for vehicles, contracts, the handover act, unlocking and tablets | See "Changes during implementation". |
+| F30 | §4 "who triggers" for system transitions | HISSE_GOZLEYIR is set by the warehouse or the formen; ODENILDI by the cashier or the bookkeeper; BAGLANDI by whoever completes the second of payment and handover. LEGV follows plan 02 Q2. |
+| F31 | §6 rules for QIYMET_PROTOKOLU and INVENTAR | Both are approved by management. |
+| F32 | §10 the tablet and the second factor | Management and the owner sign in only at the office (password + TOTP), never by PIN. |
 
 ## Changes during implementation
 
@@ -137,7 +140,20 @@ The screens in this milestone are the minimum: sign-in, PIN switch and a signed-
 | TESDIQ_GOZLEYIR → TESDIQLENDI by MANAGEMENT until milestone 6 | §4 says the client triggers it, and client approval arrives in milestone 6 (A1). |
 | Tests that approve documents use MEDAXIL or SATIS instead of QUSUR_AKTI; test approvers hold OWNER | A QUSUR_AKTI step needs the client (A1). OWNER can decide every internal step, which covers the two-step SATIS. |
 | `pnpm test:e2e` builds its own database (`diesel_e2e`) on every run (`e2e/prepare-db.ts`) | The browser tests never touch the dev database, and they start from known staff (`e2e/fixtures.ts`). |
-| `users.locked_at` is set by lib with `now()` | It is server time, but no trigger forces it; that follows the pattern of `user_roles.revoked_at`. |
+| **Spec-checker review fixes:** | |
+| The lock is computed, not stored (migration `0021` drops `users.locked_at` and `lock_reason`) | Five failed PIN, password or TOTP attempts in a row since the last successful one or the last UNLOCK lock the account. There is no column to race on, and the lock is nobody's action, whereas before it was recorded as the user locking themself. Attempts for one user are serialized by an advisory lock, so a burst of parallel guesses records at most five. Sign-outs no longer reset the count. Wrong TOTP codes count, as their own kind. |
+| An unlock is a `login_attempts` row with `recorded_by` and `reason` | `login_attempts_guard` (0022) requires the recorder to be the acting manager or owner, and forces `at` to server time. |
+| Management and the owner never sign in by PIN | Their accounts need the second factor (§10), so the PIN picker leaves them out. Mechanic-only accounts can't sign in at all yet (R3). Status `NOT_ALLOWED`. |
+| On a registered tablet, an office sign-in becomes a TABLET session | So it gets the idle lock too. |
+| Tablet sessions are bound to their tablet | `validateSession` refuses them, and ends them as `WRONG_DEVICE`, from another browser or on a revoked tablet. `revokeTablet` was added. |
+| `withSessionUser(db, session, fn)` in lib, used by `context.withSessionActor` | It makes AC5 (the actor of a write is the session's user) testable without Next. |
+| Migration `0022_approval_rule_integrity` | **Rules:** a step must be the rule's step for its position, with PAYMENT_CONFIRMER resolved to CASHIER or BOOKKEEPER. Steps are added in order and rounds follow one another. **Approval:** a round approves its document only when it is complete. **Cancelling:** a step can be cancelled only once its document has left SUBMITTED or its round was rejected, so `annulDocument` now annuls first. **Deciders:** neither the creator nor the round's submitter decides a step. **Backfill:** documents SUBMITTED before 0020 get their round (sales excluded; they are resubmitted with a payment method). |
+| A refused permission is logged as a DENIED audit row | The same as a database refusal. |
+| `AUTH_SECRET` is base64 and at least 32 bytes, checked at startup (`instrumentation.ts`) | **Rotation:** it keys the pepper, the token hashes (HMAC-SHA256, not plain SHA-256) and the TOTP encryption, so rotating it invalidates every PIN, password, session, tablet registration and TOTP enrolment. **Development:** without `AUTH_SECRET` and outside production, a fixed development secret is used. |
+| A4 correction | Turning on D3 auto-approval needs a migration after all: `approvals_guard` refuses AUTO steps and always records the deciding person. |
+| `submitDocument` starts the approval round itself; there is no separate `submitForApproval` | One function for the transaction that numbers a document and starts its approval. |
+| `can(tx, action)` reads the actor from the transaction | The actor always comes from the transaction setting, never from an argument. |
+| Known limitations | **Rule changes:** changing `approval_rules` while documents are waiting changes what "complete" means for their open round, so change the rules only when nothing is pending. **TOTP:** codes can be reused within their 30-second window. **Re-authentication:** changing your own PIN or password needs only a session. |
 
 ## Proof
 

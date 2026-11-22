@@ -23,6 +23,8 @@ export async function signInAction(form: FormData) {
     phone: text(form, "phone"),
     password: text(form, "password"),
     totpCode: text(form, "totp") || undefined,
+    // On a registered tablet the session is a tablet session, with its idle lock.
+    deviceToken: await getDeviceToken(),
   });
   if (result.status !== "OK") redirect(`/giris?e=${result.status}`);
   await setSessionCookie(result.token);
@@ -51,7 +53,7 @@ export async function signOutAction() {
 
 /** Management registers the browser in use as the shared tablet. */
 export async function registerTabletAction(form: FormData) {
-  const token = await withSessionActor((tx) => registerTablet(tx, text(form, "name") || "Planşet"));
+  const token = await withSessionActor((tx) => registerTablet(tx, text(form, "name")));
   await setDeviceCookie(token);
   redirect("/");
 }

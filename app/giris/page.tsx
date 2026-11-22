@@ -1,4 +1,5 @@
 import { getTranslations } from "next-intl/server";
+import { signInError } from "../sign-in-errors";
 import { signInAction } from "../actions";
 
 // Office sign-in: phone and password, plus a TOTP code for management and the owner.
@@ -8,11 +9,11 @@ export default async function SignInPage({
   searchParams: Promise<{ e?: string }>;
 }) {
   const t = await getTranslations("auth");
-  const { e } = await searchParams;
+  const error = signInError((await searchParams).e);
   return (
     <main>
       <h1>{t("signInTitle")}</h1>
-      {e && <p role="alert">{t(`errors.${e}` as "errors.INVALID")}</p>}
+      {error && <p role="alert">{t(`errors.${error}`)}</p>}
       <form action={signInAction}>
         <label>
           {t("phone")}

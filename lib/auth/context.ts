@@ -1,9 +1,8 @@
 import "server-only";
 import { cookies } from "next/headers";
-import { withActor } from "@/lib/audit";
 import { getDb } from "@/lib/db/client";
 import type { Tx } from "@/lib/db/types";
-import { validateSession, type SessionUser } from "./index";
+import { validateSession, withSessionUser, type SessionUser } from "./index";
 
 // Request context for screens and server actions. The acting user always comes from the
 // server-side session, never from the request body (plan 03, A8; R11, AC5).
@@ -14,8 +13,9 @@ export const DEVICE_COOKIE = "ds_device";
 const secure = process.env.NODE_ENV === "production";
 
 export async function getSessionUser(): Promise<SessionUser | null> {
-  const token = (await cookies()).get(SESSION_COOKIE)?.value;
-  return token ? validateSession(getDb(), token) : null;
+  const store = await cookies();
+  const token = store.get(SESSION_COOKIE)?.value;
+  return token ? validateSession(getDb(), token, store.get(DEVICE_COOKIE)?.value) : null;
 }
 
 export async function getDeviceToken(): Promise<string | undefined> {
@@ -47,14 +47,16 @@ export async function setDeviceCookie(token: string): Promise<void> {
   });
 }
 
-export class NotSignedInError extends Error {}
-
-/** Runs fn as the signed-in user, in one audited transaction. */
+/** Runs fn as the signed-in user, in one audited transaction (AC5). */
 export async function withSessionActor<T>(
   fn: (tx: Tx, user: SessionUser) => Promise<T>,
   reason?: string,
 ): Promise<T> {
-  const user = await getSessionUser();
-  if (!user) throw new NotSignedInError("Not signed in");
-  return withActor(getDb(), { userId: user.userId, reason }, (tx) => fn(tx, user));
+  const store = await cookies();
+  return withSessionUser(
+    getDb(),
+    { token: store.get(SESSION_COOKIE)?.value, deviceToken: store.get(DEVICE_COOKIE)?.value },
+    fn,
+    reason,
+  );
 }
