@@ -8,6 +8,8 @@
     "plateReplaced": "Avtomobilin nömrəsi dəyişdi",
     "plateRecorded": "Avtomobilin nömrəsi qeydə alındı",
     "seedUser": "İşçi hesabı ilkin quraşdırma ilə yaradıldı",
+    "jobOpened": "İş sifarişi açıldı",
+    "jobClosed": "İş sifarişi bağlandı: ödənilib və təhvil verilib",
     "documentSubmitted": "Sənəd təqdim edildi",
     "documentAnnulled": "Sənəd ləğv edildi",
     "documentPosted": "Sənəd qeydə alındı"

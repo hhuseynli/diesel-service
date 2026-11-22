@@ -113,7 +113,7 @@ Foreign keys added: `documents.job_order_id` → job_orders, and `vehicle_plates
 
 ## Files
 
-- **New:** `db/schema/jobs.ts`, `db/schema/contracts.ts`, `lib/jobs/index.ts`, `lib/contracts/index.ts`, two migrations (generated tables, then `job_order_guards`), `tests/db/jobs-lifecycle.db.test.ts`, `tests/db/contracts.db.test.ts`.
+- **New:** `db/schema/jobs.ts`, `db/schema/contracts.ts`, `lib/jobs/{index,types}.ts`, `lib/contracts/index.ts`, `tests/db/jobs-fixtures.ts`, migrations 0011 (tables), 0012 (`job_order_guards`) and 0013 (`seq`), `tests/db/jobs-lifecycle.db.test.ts`, `tests/db/contracts.db.test.ts`.
 - **Changed:**
   - `db/schema/documents.ts` and `db/schema/vehicles.ts` (the foreign keys);
   - `db/schema/index.ts`;
@@ -154,6 +154,18 @@ Foreign keys added: `documents.job_order_id` → job_orders, and `vehicle_plates
 | F20 | §3 `contract_vehicles`: one contract per car, `contract_plate` | C2 and C4. |
 | F21 | spec 01 §3.3 "put the job on hold for management" | A recorded decision, not a status (C3). |
 | F22 | §3 `job_orders`: job number format | `IS-YYYY-NNNNNN` from the gapless counter (C5). |
+
+## Changes during implementation
+
+| What | Why |
+| --- | --- |
+| Migration `0013_job_status_events_seq` adds an identity column `seq` | Several events can be written in one transaction (the automatic close), and they then share the same `at`. Their `id` is a random UUID, so `jobHistory` orders by `seq`. |
+| `contracts_guard` trigger | A contract never moves to another client, and a TERMINATED or ANNULLED contract is frozen. The plan's guard list didn't mention it. |
+| `terminateContract(tx, id, reason)` takes no date | A terminated contract checks as CONTRACT_EXPIRED from that moment. A termination date can be added if the business needs one. |
+| `job_orders.contract_id` is set only when the check is ON_CONTRACT | For a warning, the job is not under the contract: the check, the decision and the contract `checkContract` found are stored or returned, but the job isn't linked to it. |
+| `openJob` checks that `mechanicId` has an active MECHANIC role | This is a data rule, not a permission, so it doesn't wait for M3. |
+| `importVehicleList` also rejects duplicate VINs and cars active on another contract | These are the same all-or-nothing rule as missing VINs (C2). |
+| `db/schema/columns.ts` gains `sqlList` | Lists of constant values inside larger CHECK expressions. |
 
 ## Proof
 

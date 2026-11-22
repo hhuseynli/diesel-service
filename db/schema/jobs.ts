@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { check, pgTable, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core";
+import { bigint, check, pgTable, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core";
 import { CONTRACT_CHECKS, CONTRACT_DECISIONS, JOB_STATUSES } from "@/lib/jobs/types";
 import { createdAt, id, oneOf, sqlList } from "./columns";
 import { contracts } from "./contracts";
@@ -72,6 +72,8 @@ export const jobStatusEvents = pgTable(
       .references(() => users.id),
     reason: text("reason"),
     at: timestamp("at", { withTimezone: true }).notNull().defaultNow(),
+    // Orders events within one transaction, where `at` (now()) is the same.
+    seq: bigint("seq", { mode: "number" }).notNull().generatedAlwaysAsIdentity(),
   },
   (t) => [
     check("job_status_events_to_status", oneOf("to_status", JOB_STATUSES)),

@@ -85,6 +85,20 @@
       "when": 1795369707622,
       "tag": "0011_job_orders_contracts",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1795369812522,
+      "tag": "0012_job_order_guards",
+      "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1795369876525,
+      "tag": "0013_job_status_events_seq",
+      "breakpoints": true
     }
   ]
 }
