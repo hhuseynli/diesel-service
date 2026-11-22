@@ -34,8 +34,13 @@ describe("seedUser", () => {
       [result.id],
     );
     expect(audit).toEqual([
-      { table_name: "users", action: "INSERT", user_id: SYSTEM_USER_ID, reason: "seed-user" },
-      { table_name: "user_roles", action: "INSERT", user_id: SYSTEM_USER_ID, reason: "seed-user" },
+      { table_name: "users", action: "INSERT", user_id: SYSTEM_USER_ID, reason: "audit.seedUser" },
+      {
+        table_name: "user_roles",
+        action: "INSERT",
+        user_id: SYSTEM_USER_ID,
+        reason: "audit.seedUser",
+      },
     ]);
   });
 

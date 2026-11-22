@@ -1,8 +1,8 @@
 import { and, asc, eq } from "drizzle-orm";
 import { documentLines, documents, vehiclePlates, vehicles } from "@/db/schema";
-import { setReason } from "@/lib/audit";
+import { withReason } from "@/lib/audit";
 import type { Tx } from "@/lib/db/types";
-import { Money, Quantity } from "@/lib/money";
+import { Money, Quantity, Rate } from "@/lib/money";
 import { assignNumber } from "@/lib/numbering";
 import type { DocType } from "./types";
 
@@ -52,7 +52,7 @@ async function insertLines(tx: Tx, documentId: string, lines: DraftLine[]): Prom
       unitPrice: Money.parse(line.unitPrice).toDb(),
       discount: Money.parse(line.discount ?? "0").toDb(),
       discountReason: line.discountReason,
-      vatRate: line.vatRate,
+      vatRate: Rate.parse(line.vatRate).toDb(),
       lineTotal: lineTotal(line),
     })),
   );
@@ -63,7 +63,10 @@ export async function createDraft(
   header: DraftHeader,
   lines: DraftLine[] = [],
 ): Promise<string> {
-  const [doc] = await tx.insert(documents).values(header).returning({ id: documents.id });
+  const [doc] = await tx
+    .insert(documents)
+    .values({ ...header, vatRate: header.vatRate ? Rate.parse(header.vatRate).toDb() : undefined })
+    .returning({ id: documents.id });
   await insertLines(tx, doc!.id, lines);
   return doc!.id;
 }
@@ -71,59 +74,69 @@ export async function createDraft(
 /**
  * Moves a draft (or a rejected document) to SUBMITTED. A draft gets its number here, in
  * this transaction, together with the VIN and current plate of its vehicle (section 3a).
- * A corrected version reuses its predecessor's number (plan 01, Q4).
+ * A corrected version is the same document revised: it reuses its predecessor's number
+ * and snapshots (plan 01, Q4).
  */
 export async function submitDocument(tx: Tx, documentId: string): Promise<string> {
   const [doc] = await tx.select().from(documents).where(eq(documents.id, documentId)).for("update");
   if (!doc) throw new Error(`Document ${documentId} not found`);
 
-  await setReason(tx, "audit.documentSubmitted");
   if (doc.status === "REJECTED") {
-    await tx.update(documents).set({ status: "SUBMITTED" }).where(eq(documents.id, documentId));
+    await withReason(tx, "audit.documentSubmitted", () =>
+      tx.update(documents).set({ status: "SUBMITTED" }).where(eq(documents.id, documentId)),
+    );
     return doc.number!;
   }
 
   let number: string;
+  let vinSnapshot: string | null = null;
+  let plateSnapshot: string | null = null;
   if (doc.supersedesId) {
     const [predecessor] = await tx
-      .select({ number: documents.number })
+      .select({
+        number: documents.number,
+        vinSnapshot: documents.vinSnapshot,
+        plateSnapshot: documents.plateSnapshot,
+      })
       .from(documents)
       .where(eq(documents.id, doc.supersedesId));
     number = predecessor!.number!;
+    vinSnapshot = predecessor!.vinSnapshot;
+    plateSnapshot = predecessor!.plateSnapshot;
   } else {
     number = (await assignNumber(tx, doc.type as DocType)).number;
+    if (doc.vehicleId) {
+      const [vehicle] = await tx
+        .select({ vin: vehicles.vin, plate: vehiclePlates.plateDisplay })
+        .from(vehicles)
+        .leftJoin(
+          vehiclePlates,
+          and(eq(vehiclePlates.vehicleId, vehicles.id), eq(vehiclePlates.status, "ACTIVE")),
+        )
+        .where(eq(vehicles.id, doc.vehicleId));
+      vinSnapshot = vehicle!.vin;
+      plateSnapshot = vehicle!.plate;
+    }
   }
 
-  let vinSnapshot: string | null = null;
-  let plateSnapshot: string | null = null;
-  if (doc.vehicleId) {
-    const [vehicle] = await tx
-      .select({ vin: vehicles.vin, plate: vehiclePlates.plateDisplay })
-      .from(vehicles)
-      .leftJoin(
-        vehiclePlates,
-        and(eq(vehiclePlates.vehicleId, vehicles.id), eq(vehiclePlates.status, "ACTIVE")),
-      )
-      .where(eq(vehicles.id, doc.vehicleId));
-    vinSnapshot = vehicle!.vin;
-    plateSnapshot = vehicle!.plate;
-  }
-
-  await tx
-    .update(documents)
-    .set({ status: "SUBMITTED", number, vinSnapshot, plateSnapshot })
-    .where(eq(documents.id, documentId));
+  await withReason(tx, "audit.documentSubmitted", () =>
+    tx
+      .update(documents)
+      .set({ status: "SUBMITTED", number, vinSnapshot, plateSnapshot })
+      .where(eq(documents.id, documentId)),
+  );
   return number;
 }
 
 /** Cancels a document that is not approved. A numbered document keeps its number. */
 export async function annulDocument(tx: Tx, documentId: string, reason: string): Promise<void> {
   if (reason.trim() === "") throw new Error("Annulling a document needs a reason");
-  await setReason(tx, reason);
-  await tx
-    .update(documents)
-    .set({ status: "ANNULLED", annulReason: reason })
-    .where(eq(documents.id, documentId));
+  await withReason(tx, reason, () =>
+    tx
+      .update(documents)
+      .set({ status: "ANNULLED", annulReason: reason })
+      .where(eq(documents.id, documentId)),
+  );
 }
 
 /**

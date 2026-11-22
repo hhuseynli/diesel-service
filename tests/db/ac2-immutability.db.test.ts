@@ -109,6 +109,11 @@ describe("approved documents are locked", () => {
         }),
       ),
     ).rejects.toBeInstanceOf(DocumentLockedError);
+    expect(await lastDenied()).toMatchObject({
+      table_name: "document_lines",
+      user_id: creator,
+      details: expect.objectContaining({ sqlstate: "DM001" }),
+    });
   });
 
   it("annulling fails: corrections use a new version or a reversing document", async () => {
@@ -116,6 +121,11 @@ describe("approved documents are locked", () => {
     await expect(
       withActor(t.db, { userId: creator }, (tx) => annulDocument(tx, doc.id, "səhv")),
     ).rejects.toBeInstanceOf(DocumentLockedError);
+    expect(await lastDenied()).toMatchObject({
+      table_name: "documents",
+      record_id: doc.id,
+      user_id: creator,
+    });
   });
 
   it("APPROVED -> POSTED is allowed when only the status changes", async () => {
@@ -167,6 +177,41 @@ describe("approved documents are locked", () => {
         ),
       ),
     ).toBe("DM001");
+  });
+
+  it("the line lock and the POSTED and ANNULLED freezes hold for the owner role too", async () => {
+    const approved = await approvedDoc();
+    const posted = await approvedDoc();
+    await withActor(t.db, { userId: approver, reason: "post" }, (tx) =>
+      tx.update(documents).set({ status: "POSTED" }).where(eq(documents.id, posted.id)),
+    );
+    const annulled = await draft(t.db, creator);
+    await withActor(t.db, { userId: creator }, (tx) => annulDocument(tx, annulled, "lazım deyil"));
+
+    const asOwner = (statement: string, id: string) =>
+      sqlstateOf(
+        asActor(t.migratorPool, { userId: SYSTEM_USER_ID, reason: "x" }, (c) =>
+          c.query(statement, [id]),
+        ),
+      );
+    for (const id of [approved.id, posted.id, annulled]) {
+      expect(
+        await asOwner("UPDATE document_lines SET unit_price = 1 WHERE document_id = $1", id),
+      ).toBe("DM001");
+      expect(
+        await asOwner(
+          `INSERT INTO document_lines (document_id, line_no, quantity, unit, unit_price, vat_rate, line_total)
+           VALUES ($1, 99, 1, 'ədəd', 1, 18, 1)`,
+          id,
+        ),
+      ).toBe("DM001");
+      expect(
+        await asOwner(
+          "UPDATE documents SET status = 'ANNULLED', annul_reason = 'x' WHERE id = $1",
+          id,
+        ),
+      ).toBe("DM001");
+    }
   });
 
   it("status can only follow the lifecycle", async () => {
@@ -242,13 +287,23 @@ describe("nothing is deleted", () => {
     }
   });
 
-  it("TRUNCATE fails for the app role on every table", async () => {
+  it("TRUNCATE fails for the app role on every table, and is logged as DENIED", async () => {
     for (const table of tables) {
       await expect(
         withActor(t.db, { userId: creator }, (tx) => tx.execute(sql.raw(`TRUNCATE "${table}"`))),
         table,
       ).rejects.toBeInstanceOf(PermissionDeniedError);
+      expect(await lastDenied(), table).toMatchObject({ table_name: table, user_id: creator });
     }
+  });
+
+  it("a refused write without a valid actor is still logged, with no user", async () => {
+    await expect(
+      withActor(t.db, { userId: "not-a-uuid" }, (tx) =>
+        tx.update(documents).set({ annulReason: "x" }),
+      ),
+    ).rejects.toThrow();
+    expect(await lastDenied()).toMatchObject({ user_id: null });
   });
 
   it("DELETE and TRUNCATE fail for the owner role too (DM002)", async () => {

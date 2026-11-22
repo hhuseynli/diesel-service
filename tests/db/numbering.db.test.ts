@@ -6,7 +6,8 @@ import { submitDocument } from "@/lib/documents";
 import { assignNumber } from "@/lib/numbering";
 import { createUser } from "./fixtures";
 import { draft, sequenceOf } from "./documents-fixtures";
-import { asActor, createTestDb, SYSTEM_USER_ID, type TestDb } from "./helpers";
+import { ImmutableError } from "@/lib/db/errors";
+import { asActor, createTestDb, sqlstateOf, SYSTEM_USER_ID, type TestDb } from "./helpers";
 
 let t: TestDb;
 let userId: string;
@@ -74,5 +75,46 @@ describe("assignNumber", () => {
     await expect(withActor(t.db, { userId }, (tx) => assignNumber(tx, "MEDAXIL"))).rejects.toThrow(
       RangeError,
     );
+  });
+});
+
+describe("document_counters guard: numbering does not rest on the app alone", () => {
+  it("the app role cannot move a counter except forward by one", async () => {
+    await withActor(t.db, { userId }, (tx) => assignNumber(tx, "INVENTAR"));
+    for (const statement of [
+      "UPDATE document_counters SET last_number = last_number + 5 WHERE doc_type = 'INVENTAR'",
+      "UPDATE document_counters SET last_number = last_number - 1 WHERE doc_type = 'INVENTAR'",
+      "UPDATE document_counters SET year = year + 1 WHERE doc_type = 'INVENTAR'",
+    ]) {
+      await expect(
+        withActor(t.db, { userId, reason: "x" }, (tx) => tx.execute(sql.raw(statement))),
+        statement,
+      ).rejects.toBeInstanceOf(ImmutableError);
+    }
+  });
+
+  it("the app role can only start a counter at 1; the migration role may start elsewhere", async () => {
+    await expect(
+      withActor(t.db, { userId }, (tx) =>
+        tx.execute(
+          sql`INSERT INTO document_counters (doc_type, year, last_number) VALUES ('ALIS', 2099, 5)`,
+        ),
+      ),
+    ).rejects.toBeInstanceOf(ImmutableError);
+    await asActor(t.migratorPool, { userId: SYSTEM_USER_ID }, (c) =>
+      c.query(
+        "INSERT INTO document_counters (doc_type, year, last_number) VALUES ('ALIS', 2099, 5)",
+      ),
+    );
+  });
+
+  it("created_* on a counter cannot change, with the right error (DM005)", async () => {
+    expect(
+      await sqlstateOf(
+        asActor(t.migratorPool, { userId: SYSTEM_USER_ID, reason: "x" }, (c) =>
+          c.query("UPDATE document_counters SET created_at = created_at - interval '1 day'"),
+        ),
+      ),
+    ).toBe("DM005");
   });
 });

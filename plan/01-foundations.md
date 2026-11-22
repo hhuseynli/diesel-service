@@ -198,7 +198,7 @@ Nothing here changes milestone 1. The three conflicts above (landed cost, wareho
 - **`docker/initdb/01-roles.sh`:** creates both roles and the `diesel` database owned by the migrator, with passwords from the environment.
 - **App:** `app/layout.tsx`, `app/page.tsx` (placeholder showing a heading from translations), `i18n/request.ts` (next-intl with a single locale, `az`), `messages/az.json`.
 - **`db/schema/`:** `index.ts`, `people.ts`, `contragents.ts`, `vehicles.ts`, `documents.ts`, `system.ts`.
-- **`db/migrations/`:** `0000`–`0007` plus `meta/` (0005–0007: see "Changes during implementation").
+- **`db/migrations/`:** `0000`–`0010` plus `meta/` (0005–0010: see "Changes during implementation").
 - **`scripts/`:**
   - `db-new.ts`: `<name>` runs a schema-diff generate. `<name> --from <file>` runs `generate --custom`, writes the draft into the new file, and refuses if that file is not empty.
   - `check-migrations.sh`: fails if any `db/migrations/*.sql` is modified, renamed or deleted relative to `origin/main`, and runs `drizzle-kit check`.
@@ -313,6 +313,9 @@ This plan already assumes these changes.
 | F10 | §5.3 lock list | ANNULLED isn't mentioned. | Freeze ANNULLED documents too, because they are terminal. |
 | F11 | §3a rule 5 | It doesn't say what happens to an UNCONFIRMED plate once its own car comes back. | That car's new plate ends the UNCONFIRMED row (`valid_to` = today). |
 | F12 | §3a `recorded_by` | It duplicates `created_by`. | Map `recorded_by` to `created_by`. |
+| F13 | §7 "Once numbered, a document can be annulled" vs §5.3 | An APPROVED or POSTED document is numbered but locked. | Only DRAFT, SUBMITTED and REJECTED documents can be annulled. An approved one is corrected by a new version or a reversing document. |
+| F14 | §2 and R8: `vehicles.vin` and `qr_token` | The spec doesn't say whether these may ever change. | Both can be changed today, with a reason and an audit row (for example, a mistyped VIN). **Decide** whether VIN corrections should be blocked or need management. |
+| F15 | §5.1 audit_log append-only, and R20 | Names, phones and VOEN in audit rows are kept forever and can't be deleted. | Kept as the spec says. **Check** this against Azerbaijani personal-data rules when R20 is decided. |
 
 **Open items** (these don't block milestone 1):
 - **O1:** the company's VOEN, address and bank details for the `company` setting.
@@ -336,6 +339,21 @@ Recorded as required by CLAUDE.md. None of them changes behaviour the plan promi
 | P11–P13 are three `describe` blocks in `tests/db/plates.db.test.ts`, not three files | They share the vehicle and plate fixtures. |
 | Extra test helpers: `tests/db/env.ts`, `tests/db/documents-fixtures.ts`; `lib/db/types.ts` for the `Db`/`Tx` types | Shared by the test files and lib modules. |
 | Known limitation | If a corrected version (v2) is annulled, `supersedes_id` stays taken, so the original can't get another version. To revisit with the approval engine in milestone 3. |
+| Migration `0008_counter_guards` | (a) `stamp_created` from 0005 read `OLD.id`, so a `created_*` change on `document_counters` failed with 42703 instead of DM005 (found by the verifier). (b) New `document_counters_guard`: a counter only moves forward by exactly one, and the app role can only start one at 1. Gapless numbering no longer rests only on `lib/numbering`. The migration role may start a counter elsewhere, which continuing 1C numbering at cut-over may need. |
+| Migration `0009_row_history_guards` | Found by the spec-checker. A numbered document can no longer change its vehicle, client or job order. `vehicle_plates` rows allow only ACTIVE → ENDED/UNCONFIRMED and UNCONFIRMED → ENDED (section 3a: nothing is overwritten). `user_roles` rows are only ever revoked: they can't be edited, and a revocation can't be undone. |
+| Migration `0010_plates_guard_generated_column` | 0009's plate guard compared `plate_normalized`, which is still NULL in `NEW` inside a BEFORE trigger, so it refused every legitimate plate change. It now ignores that column; `plate_display` is still compared. |
+| `withReason(tx, reason, fn)` in `lib/audit` | Lib functions set their reason key only for their own writes, then restore the caller's. Before this, a key like `audit.plateRecorded` leaked onto later, unrelated updates and weakened F9. |
+| A corrected version copies its predecessor's VIN and plate snapshots | It is the same numbered document, revised, so it keeps what the original was issued with. |
+| `createDraft` checks VAT rates with `Rate.parse` | A value like `18.005` is now refused instead of rounded by Postgres. |
+| `0001` uses `ALTER DEFAULT PRIVILEGES FOR ROLE diesel_migrator REVOKE EXECUTE ON FUNCTIONS FROM PUBLIC` | No functions existed when 0001 ran, so this is the statement that covers the functions created afterwards. The catalog test checks the result. |
+| `lib/db/errors.ts` doesn't map 23505 to a general error | The only unique violation with a meaning today is the plate race, which `recordPlate` turns into `PlateConflictError`. |
+| `DENIED` rows store the error class (e.g. `DocumentLockedError`) in `details.operation`, not DELETE/UPDATE | The database reports the refusal, not the statement type. `details.message` has the full text. |
+| Writing the `DENIED` row is best effort | If it fails, the original refusal is still thrown and the failure goes to the server log. Postgres's own log (`log_min_error_statement`) records every refused statement as well. |
+| `vehicle_plates.plate_display` is limited to 1–20 characters | A sanity limit, not a format check. Foreign plates are otherwise accepted as written (section 3a.3). |
+| Other files: `AGENTS.md` (written by `next dev`), `pnpm-workspace.yaml` (pnpm build-script allowlist), `lib/users/roles.ts`, `tests/db/history-guards.db.test.ts` | Supporting files. |
+| Not enforced yet: roles and permissions | Any active user can write anything, including MECHANIC, which spec §10 gives no permissions. Role checks, `change_price` and the owner's price-change report (R5) belong to the approval engine and permissions milestone (3). |
+| Not done yet: header totals, VAT and `documents.vat_rate` from settings | These wait for the VAT method (D4, R16) in the warehouse milestone. `line_total` is price × quantity − discount, excluding VAT, with the discount as an amount. |
+| Superseded versions | Nothing marks v1 as superseded. The current version is the one no other row points to through `supersedes_id`. |
 
 ## Proof
 
@@ -345,7 +363,7 @@ Run in order on a clean checkout with Docker running and `.env` copied from `.en
 | --- | --- | --- |
 | P1 | `pnpm exec node --version` → `v22.*` | Node 22 pin |
 | P2 | `pnpm lint && pnpm typecheck` → exit 0 | lint, types, no JSX string literals in `app/` |
-| P3 | `docker compose up -d db && pnpm db:migrate` → applies 0000–0007 | compose, roles, migrations |
+| P3 | `docker compose up -d db && pnpm db:migrate` → applies 0000–0010 | compose, roles, migrations |
 | P4 | `pnpm db:check` → exit 0 | migrations are append-only and match the schema |
 | P5 | `pnpm test` → `lib/money/money.test.ts`, `lib/numbering/format.test.ts`, `lib/vehicles/vin.test.ts`, `lib/vehicles/plates.test.ts` pass | exact money and rounding; `QA-2026-000123`; "90-JG-526" normalizes to "90JG526"; VIN rules |
 | P6 | `pnpm test:db` → `tests/db/catalog.db.test.ts` | the app role has no DELETE or TRUNCATE anywhere; audit_log SELECT only; attachments no UPDATE; every table has its triggers |
@@ -358,6 +376,7 @@ Run in order on a clean checkout with Docker running and `.env` copied from `.en
 | P13 | `tests/db/plates.db.test.ts`, describe "acceptance criterion 9" (**acceptance criterion 9**) | Car 1 has plate P. `recordPlate(car2, P)` succeeds. Car 1's row becomes UNCONFIRMED, its other rows are untouched, car 2's row is ACTIVE, and the return value has `conflicts=[car1]`. The two unique indexes hold. Two concurrent `recordPlate` calls for the same plate leave exactly one ACTIVE row. |
 | P14 | `pnpm test:e2e` → `e2e/smoke.spec.ts` | Next.js, next-intl and `messages/az.json` render; Playwright works |
 | P15 | **Run by a human** (the guard-bash hook blocks any command containing `DELETE FROM`, including Claude's and the verifier's): `psql "$DATABASE_URL" -c "DELETE FROM users"` → `permission denied` | the guarantee holds outside the app |
+| P17 | `tests/db/history-guards.db.test.ts` | Plate rows can't be renamed, moved or revived. Roles are revoked once, never edited. A numbered document keeps its vehicle. A corrected version keeps the original's number and snapshots. A rejected document resubmits with the same number and uses no new one. Reasons don't leak between writes. A counter from another year doesn't affect this year's. The seeded company and 18% VAT are present. A discount needs a reason. The database refuses malformed VINs. QR tokens are random and unique. |
 | P16 | `tests/db/seed-user.db.test.ts`; then, once O3 is known, `pnpm db:seed-user … --role CASHIER` and `psql "$DATABASE_URL" -c "select u.full_name, r.role from users u join user_roles r on r.user_id=u.id where r.role='CASHIER'"` | **Test:** the user and role rows are created with audit rows, the system user is the actor, and a second run makes no change. **Run:** the real cashier exists with the CASHIER role. |
 
 ## Answers to the three review questions

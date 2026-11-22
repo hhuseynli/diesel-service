@@ -1,6 +1,6 @@
 import { sql } from "drizzle-orm";
 import { vehicles } from "@/db/schema";
-import { setReason } from "@/lib/audit";
+import { withReason } from "@/lib/audit";
 import { pgErrorOf } from "@/lib/db/errors";
 import type { Db, Tx } from "@/lib/db/types";
 import { normalizePlate } from "./plates";
@@ -94,25 +94,28 @@ export async function recordPlate(
        AND plate_normalized = ${normalized}`);
   if (current.rows.length > 0) return { changed: false, conflicts: [] };
 
-  await setReason(tx, "audit.plateMovedToOtherVehicle");
-  const moved = await tx.execute<{ vehicle_id: string; vin: string }>(sql`
-    UPDATE vehicle_plates vp SET status = 'UNCONFIRMED'
-      FROM vehicles v
-     WHERE v.id = vp.vehicle_id AND vp.status = 'ACTIVE'
-       AND vp.plate_normalized = ${normalized} AND vp.vehicle_id <> ${input.vehicleId}
-    RETURNING vp.vehicle_id, v.vin`);
+  const moved = await withReason(tx, "audit.plateMovedToOtherVehicle", () =>
+    tx.execute<{ vehicle_id: string; vin: string }>(sql`
+      UPDATE vehicle_plates vp SET status = 'UNCONFIRMED'
+        FROM vehicles v
+       WHERE v.id = vp.vehicle_id AND vp.status = 'ACTIVE'
+         AND vp.plate_normalized = ${normalized} AND vp.vehicle_id <> ${input.vehicleId}
+      RETURNING vp.vehicle_id, v.vin`),
+  );
 
-  await setReason(tx, "audit.plateReplaced");
-  await tx.execute(sql`
-    UPDATE vehicle_plates SET status = 'ENDED', valid_to = baku_date()
-     WHERE vehicle_id = ${input.vehicleId} AND status IN ('ACTIVE', 'UNCONFIRMED')`);
+  await withReason(tx, "audit.plateReplaced", () =>
+    tx.execute(sql`
+      UPDATE vehicle_plates SET status = 'ENDED', valid_to = baku_date()
+       WHERE vehicle_id = ${input.vehicleId} AND status IN ('ACTIVE', 'UNCONFIRMED')`),
+  );
 
-  await setReason(tx, "audit.plateRecorded");
   try {
-    await tx.execute(sql`
-      INSERT INTO vehicle_plates (vehicle_id, plate_display, valid_from, status, source, job_order_id)
-      VALUES (${input.vehicleId}, ${display}, baku_date(), 'ACTIVE', ${input.source},
-              ${input.jobOrderId ?? null})`);
+    await withReason(tx, "audit.plateRecorded", () =>
+      tx.execute(sql`
+        INSERT INTO vehicle_plates (vehicle_id, plate_display, valid_from, status, source, job_order_id)
+        VALUES (${input.vehicleId}, ${display}, baku_date(), 'ACTIVE', ${input.source},
+                ${input.jobOrderId ?? null})`),
+    );
   } catch (e) {
     if (pgErrorOf(e)?.constraint === "vehicle_plates_one_active_per_plate") {
       throw new PlateConflictError(`Plate ${display} was just recorded on another vehicle`, {

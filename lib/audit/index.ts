@@ -39,6 +39,20 @@ export async function setReason(tx: Tx, reason: string): Promise<void> {
   await tx.execute(sql`SELECT set_config('app.reason', ${reason}, true)`);
 }
 
+/**
+ * Runs fn with this reason, then restores the caller's reason, so a lib function's
+ * reason never leaks onto later, unrelated updates in the same transaction.
+ */
+export async function withReason<T>(tx: Tx, reason: string, fn: () => Promise<T>): Promise<T> {
+  const { rows } = await tx.execute<{ reason: string | null }>(
+    sql`SELECT current_setting('app.reason', true) AS reason`,
+  );
+  await setReason(tx, reason);
+  const result = await fn();
+  await setReason(tx, rows[0]?.reason ?? "");
+  return result;
+}
+
 async function applyActor(tx: Tx, actor: Actor): Promise<void> {
   await tx.execute(
     sql`SELECT set_config('app.user_id', ${actor.userId}, true),

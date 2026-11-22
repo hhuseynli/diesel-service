@@ -30,7 +30,7 @@ export async function seedUser(pool: Pool, input: SeedUserInput): Promise<SeedUs
   try {
     await client.query("BEGIN");
     await client.query(
-      "SELECT set_config('app.user_id', $1, true), set_config('app.reason', 'seed-user', true)",
+      "SELECT set_config('app.user_id', $1, true), set_config('app.reason', 'audit.seedUser', true)",
       [SYSTEM_USER_ID],
     );
     const existing = await client.query<{ id: string }>("SELECT id FROM users WHERE phone = $1", [

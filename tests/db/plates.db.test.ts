@@ -3,7 +3,7 @@ import { eq, sql } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { documents } from "@/db/schema";
 import { withActor } from "@/lib/audit";
-import { ImmutableError } from "@/lib/db/errors";
+import { ImmutableError, pgErrorOf } from "@/lib/db/errors";
 import {
   createVehicle,
   normalizePlate,
@@ -193,14 +193,29 @@ describe("acceptance criterion 9: a plate active on another car", () => {
 
   it("the database allows at most one ACTIVE plate per car and per plate", async () => {
     const car = await vehicle("66-CC-666");
-    const other = await vehicle("66-CC-667");
+    const other = await vehicle();
     const insertActive = (vehicleId: string, plate: string) =>
       withActor(t.db, { userId: formen }, (tx) =>
         tx.execute(sql`INSERT INTO vehicle_plates (vehicle_id, plate_display, valid_from, status, source)
                        VALUES (${vehicleId}, ${plate}, baku_date(), 'ACTIVE', 'IMPORT')`),
       );
-    await expect(insertActive(car.id, "66-CC-999")).rejects.toThrow();
-    await expect(insertActive(other.id + "", "66 cc 666")).rejects.toThrow();
+    const violation = async (p: Promise<unknown>) => {
+      try {
+        await p;
+      } catch (e) {
+        const pg = pgErrorOf(e);
+        return [pg?.code, pg?.constraint];
+      }
+      throw new Error("Expected a unique violation");
+    };
+    expect(await violation(insertActive(car.id, "66-CC-999"))).toEqual([
+      "23505",
+      "vehicle_plates_one_active_per_vehicle",
+    ]);
+    expect(await violation(insertActive(other.id, "66 cc 666"))).toEqual([
+      "23505",
+      "vehicle_plates_one_active_per_plate",
+    ]);
   });
 
   it("two cars recording the same plate at once leave exactly one ACTIVE row", async () => {

@@ -109,6 +109,7 @@ describe("catalog", () => {
     expect(await triggersOf("document_lines")).toContain("document_lines_guard");
     expect(await triggersOf("audit_log")).toContain("forbid_update");
     expect(await triggersOf("attachments")).toContain("forbid_update");
+    expect(await triggersOf("document_counters")).toContain("document_counters_guard");
   });
 
   it("every SECURITY DEFINER function pins its search_path", async () => {

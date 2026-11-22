@@ -22,6 +22,15 @@ export async function createUser(
   });
 }
 
+/** Returns a submitted document to its creator (the approval engine's job in milestone 3). */
+export async function rejectForTest(appPool: Pool, userId: string, documentId: string) {
+  await asActor(appPool, { userId, reason: "test rejection" }, (c) =>
+    c.query("UPDATE documents SET status = 'REJECTED' WHERE id = $1 AND status = 'SUBMITTED'", [
+      documentId,
+    ]),
+  );
+}
+
 /**
  * Approves a submitted document directly. The approval engine (creator cannot approve,
  * approval steps) arrives in milestone 3; until then tests use this fixture.
