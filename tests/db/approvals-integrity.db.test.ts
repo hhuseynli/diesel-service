@@ -2,7 +2,7 @@
 import { and, eq } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { approvals, documents, userRoles } from "@/db/schema";
-import { approveStep, rejectStep } from "@/lib/approvals";
+import { approveStep, pendingFor, rejectStep } from "@/lib/approvals";
 import { withActor } from "@/lib/audit";
 import {
   ApprovalNotAllowedError,
@@ -43,15 +43,21 @@ const steps = (documentId: string) =>
 
 describe("rounds are the rule in settings", () => {
   it("a step with another role, out of order, or a second open round is refused", async () => {
-    const id = await draft(t.db, anbardar, "SATIS");
-    const insert = (round: number, stepNo: number, requiredRole: string) =>
-      withActor(t.db, { userId: anbardar }, async (tx) => {
-        await tx.update(documents).set({ status: "SUBMITTED" }).where(eq(documents.id, id));
-        await tx.insert(approvals).values({ documentId: id, round, stepNo, requiredRole });
-      });
-    // Even before the number check, the step must be the rule's: no skipping management.
-    const wrong = await insert(1, 1, "CASHIER").catch((e: unknown) => e);
-    expect(pgErrorOf(wrong)?.code).toMatch(/DM00[56]/);
+    // A sale whose first round was rejected: round 2 must start with management again.
+    const sale = await draft(t.db, anbardar, "SATIS");
+    await withActor(t.db, { userId: anbardar }, (tx) =>
+      submitDocument(tx, sale, { paymentMethod: "CASH" }),
+    );
+    const [first] = await steps(sale);
+    await withActor(t.db, { userId: rehberlik }, (tx) => rejectStep(tx, first!.id, "Yox"));
+    const wrong = await withActor(t.db, { userId: anbardar, reason: "x" }, async (tx) => {
+      await tx.update(documents).set({ status: "SUBMITTED" }).where(eq(documents.id, sale));
+      await tx
+        .insert(approvals)
+        .values({ documentId: sale, round: 2, stepNo: 1, requiredRole: "CASHIER" });
+    }).catch((e: unknown) => e);
+    expect(pgErrorOf(wrong)).toMatchObject({ code: "DM005" });
+    expect(String((wrong as Error).message)).toMatch(/must be MANAGEMENT/);
 
     const doc = await submittedMedaxil();
     await expect(
@@ -145,5 +151,41 @@ describe("who decides", () => {
     await expect(
       withActor(t.db, { userId: former }, (tx) => approveStep(tx, step!.id)),
     ).rejects.toBeInstanceOf(ApprovalNotAllowedError);
+  });
+});
+
+describe("second verifier pass", () => {
+  it("a pending step cannot carry a decider or a comment", async () => {
+    const doc = await submittedMedaxil();
+    const [step] = await steps(doc);
+    await expect(
+      withActor(t.db, { userId: rehberlik, reason: "x" }, (tx) =>
+        tx
+          .update(approvals)
+          .set({ decidedBy: anbardar, comment: "saxta" })
+          .where(eq(approvals.id, step!.id)),
+      ),
+    ).rejects.toBeInstanceOf(ImmutableError);
+  });
+
+  it("an old rejection cannot be replayed without a new decision", async () => {
+    const doc = await submittedMedaxil();
+    const [step] = await steps(doc);
+    await withActor(t.db, { userId: rehberlik }, (tx) => rejectStep(tx, step!.id, "Yox"));
+    await expect(
+      withActor(t.db, { userId: anbardar, reason: "x" }, async (tx) => {
+        await tx.update(documents).set({ status: "SUBMITTED" }).where(eq(documents.id, doc));
+        await tx.update(documents).set({ status: "REJECTED" }).where(eq(documents.id, doc));
+      }),
+    ).rejects.toBeInstanceOf(InvalidTransitionError);
+  });
+
+  it("the queue leaves out rounds the user submitted", async () => {
+    const doc = await submittedMedaxil();
+    const [step] = await steps(doc);
+    await withActor(t.db, { userId: rehberlik }, (tx) => rejectStep(tx, step!.id, "Düzəlt"));
+    await withActor(t.db, { userId: owner }, (tx) => submitDocument(tx, doc));
+    expect((await pendingFor(t.db, owner)).map((p) => p.documentId)).not.toContain(doc);
+    expect((await pendingFor(t.db, rehberlik)).map((p) => p.documentId)).toContain(doc);
   });
 });

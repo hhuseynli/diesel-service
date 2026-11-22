@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { boolean, check, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";
+import { boolean, check, index, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";
 import { createdAt, id } from "./columns";
 import { createdBy, users } from "./people";
 
@@ -39,6 +39,8 @@ export const sessions = pgTable(
     check("sessions_kind", sql`${t.kind} IN ('OFFICE', 'TABLET')`),
     check("sessions_tablet_device", sql`(${t.kind} = 'TABLET') = (${t.deviceId} IS NOT NULL)`),
     check("sessions_end", sql`(${t.endedAt} IS NULL) = (${t.endReason} IS NULL)`),
+    index("sessions_user").on(t.userId),
+    index("sessions_device").on(t.deviceId),
   ],
 );
 
@@ -65,5 +67,7 @@ export const loginAttempts = pgTable(
       "login_attempts_unlock",
       sql`(${t.kind} = 'UNLOCK') = (${t.recordedBy} IS NOT NULL AND btrim(coalesce(${t.reason}, '')) <> '')`,
     ),
+    // isLocked runs on every request; the table only grows.
+    index("login_attempts_user_at").on(t.userId, t.at),
   ],
 );

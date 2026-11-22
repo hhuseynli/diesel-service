@@ -7,6 +7,7 @@ import { withActor } from "@/lib/audit";
 import {
   enableTotp,
   isLocked,
+  lockState,
   MAX_FAILURES,
   NotSignedInError,
   pinCandidates,
@@ -20,9 +21,10 @@ import {
   unlockUser,
   validateSession,
   withSessionUser,
+  TotpCodeRequiredError,
   type SignInResult,
 } from "@/lib/auth";
-import { hashToken } from "@/lib/auth/crypto";
+import { base32Decode, hashToken, totp } from "@/lib/auth/crypto";
 import { PermissionError } from "@/lib/permissions";
 import type { Role } from "@/lib/users/roles";
 import { createUser } from "./fixtures";
@@ -162,11 +164,11 @@ describe("the lock", () => {
     expect((await pinCandidates(t.db)).map((c) => c.id)).not.toContain(formen.id);
   });
 
-  it("locking ends the user's open sessions", async () => {
-    const cashier = await staff(["CASHIER"], { password: "kassa-sessiya-1" });
+  it("the PIN lock ends the user's open sessions", async () => {
+    const cashier = await staff(["CASHIER"], { pin: "1590", password: "kassa-sessiya-1" });
     const s = await signInWithPassword(t.db, { phone: cashier.phone, password: "kassa-sessiya-1" });
     for (let i = 0; i < MAX_FAILURES; i++) {
-      await signInWithPassword(t.db, { phone: cashier.phone, password: "yanlis-sifre-x" });
+      await signInWithPin(t.db, { deviceToken, userId: cashier.id, pin: "0000" });
     }
     expect(await validateSession(t.db, tokenOf(s))).toBeNull();
     const [row] = await t.db
@@ -174,6 +176,22 @@ describe("the lock", () => {
       .from(sessions)
       .where(eq(sessions.tokenHash, hashToken(tokenOf(s))));
     expect(row!.endReason).toBe("USER_LOCKED");
+  });
+
+  it("wrong passwords only pause office sign-in: sessions and the tablet go on", async () => {
+    const cashier = await staff(["CASHIER"], { pin: "1591", password: "kassa-pauza-12" });
+    const s = await signInWithPassword(t.db, { phone: cashier.phone, password: "kassa-pauza-12" });
+    for (let i = 0; i < MAX_FAILURES; i++) {
+      await signInWithPassword(t.db, { phone: cashier.phone, password: "yanlis-sifre-x" });
+    }
+    expect(await lockState(t.db, cashier.id)).toBe("OFFICE_PAUSED");
+    expect(
+      (await signInWithPassword(t.db, { phone: cashier.phone, password: "kassa-pauza-12" })).status,
+    ).toBe("LOCKED");
+    expect(await validateSession(t.db, tokenOf(s))).not.toBeNull();
+    expect(
+      (await signInWithPin(t.db, { deviceToken, userId: cashier.id, pin: "1591" })).status,
+    ).toBe("OK");
   });
 
   it("only management unlocks, with a reason, recorded under their name", async () => {
@@ -292,5 +310,112 @@ describe("sessions and AC5", () => {
     expect(JSON.stringify(rows)).not.toContain(secret);
     expect(JSON.stringify(rows)).not.toContain('totp_secret_enc":');
     expect(rows.map((r) => r.details)).toContainEqual({ totp_secret_changed: true });
+  });
+});
+
+describe("second verifier pass", () => {
+  it("only the owner changes settings, and a missing approval rule refuses", async () => {
+    const formen = await staff(["FORMEN"], {});
+    const owner = await staff(["OWNER"], {});
+    const insert = (userId: string) =>
+      withActor(t.db, { userId }, (tx) =>
+        tx.execute(sql`INSERT INTO settings (key, value) VALUES ('approval_rules', '{}')`),
+      );
+    await expect(insert(formen.id)).rejects.toThrow();
+    await expect(insert(manager)).rejects.toThrow();
+    const { rows } = await t.migratorPool.query(
+      "SELECT count(*)::int AS n FROM settings WHERE key = 'approval_rules'",
+    );
+    expect(rows[0].n).toBe(1);
+    await withActor(t.db, { userId: owner.id }, (tx) =>
+      tx.execute(sql`INSERT INTO settings (key, value) VALUES ('tablet_idle_seconds', '300')`),
+    );
+    expect(await sqlstateOf(t.appPool.query("SELECT approval_rule('NO_SUCH_TYPE')"))).toBe("DM006");
+  });
+
+  it("nobody records a successful sign-in, or opens a session, for someone else", async () => {
+    const formen = await staff(["FORMEN"], { pin: "4444" });
+    const cashier = await staff(["CASHIER"], {});
+    expect(
+      await sqlstateOf(
+        asActor(t.appPool, { userId: cashier.id }, (c) =>
+          c.query("INSERT INTO login_attempts (user_id, kind, success) VALUES ($1, 'PIN', true)", [
+            formen.id,
+          ]),
+        ),
+      ),
+    ).toBe("DM007");
+    expect(
+      await sqlstateOf(
+        asActor(t.appPool, { userId: cashier.id }, (c) =>
+          c.query(
+            "INSERT INTO sessions (user_id, token_hash, kind, expires_at) VALUES ($1, 'h1', 'OFFICE', now() + interval '1 hour')",
+            [formen.id],
+          ),
+        ),
+      ),
+    ).toBe("DM007");
+    const { rows } = await asActor(t.appPool, { userId: cashier.id }, (c) =>
+      c.query(
+        `INSERT INTO sessions (user_id, token_hash, kind, expires_at)
+         VALUES ($1, 'h2', 'OFFICE', now() + interval '10 years')
+         RETURNING expires_at <= now() + interval '12 hours' AS capped`,
+        [cashier.id],
+      ),
+    );
+    expect(rows[0].capped).toBe(true);
+  });
+
+  it("answers do not reveal accounts: unknown phones and NOT_ALLOWED", async () => {
+    const mechanic = await staff(["MECHANIC"], { password: "temirci-sifre-2" });
+    expect(
+      (await signInWithPassword(t.db, { phone: mechanic.phone, password: "yanlis-sifre-x" }))
+        .status,
+    ).toBe("INVALID");
+    expect(
+      (await signInWithPassword(t.db, { phone: "+994000000000", password: "yanlis-sifre-x" }))
+        .status,
+    ).toBe("INVALID");
+    expect(
+      (await signInWithPin(t.db, { deviceToken, userId: "not-a-uuid", pin: "1234" })).status,
+    ).toBe("INVALID");
+  });
+
+  it("replacing an authenticator needs a code from the current one; the owner may reset it", async () => {
+    const boss = await staff(["MANAGEMENT"], {});
+    const owner = await staff(["OWNER"], {});
+    const first = await withActor(t.db, { userId: boss.id }, (tx) => enableTotp(tx, boss.id));
+    await expect(
+      withActor(t.db, { userId: boss.id }, (tx) => enableTotp(tx, boss.id)),
+    ).rejects.toBeInstanceOf(TotpCodeRequiredError);
+    const { rows } = await t.db.execute<{ t: string }>(
+      sql`SELECT extract(epoch FROM now())::bigint AS t`,
+    );
+    const code = totp(base32Decode(first), Number(rows[0]!.t));
+    await withActor(t.db, { userId: boss.id }, (tx) =>
+      enableTotp(tx, boss.id, { currentCode: code }),
+    );
+    await withActor(t.db, { userId: owner.id }, (tx) => enableTotp(tx, boss.id));
+  });
+
+  it("seed-user can give the first owner a password and an authenticator", async () => {
+    const { seedUser } = await import("@/lib/users/seed");
+    const result = await seedUser(t.migratorPool, {
+      fullName: "İlk Sahibkar",
+      phone: "+994509998877",
+      role: "OWNER",
+      password: "sahibkar-sifre-1",
+      enrolTotp: true,
+    });
+    expect(result.totpSecret).toMatch(/^[A-Z2-7]{32}$/);
+    const { rows } = await t.db.execute<{ t: string }>(
+      sql`SELECT extract(epoch FROM now())::bigint AS t`,
+    );
+    const signed = await signInWithPassword(t.db, {
+      phone: "+994509998877",
+      password: "sahibkar-sifre-1",
+      totpCode: totp(base32Decode(result.totpSecret!), Number(rows[0]!.t)),
+    });
+    expect(signed.status).toBe("OK");
   });
 });

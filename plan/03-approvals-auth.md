@@ -153,7 +153,17 @@ The screens in this milestone are the minimum: sign-in, PIN switch and a signed-
 | A4 correction | Turning on D3 auto-approval needs a migration after all: `approvals_guard` refuses AUTO steps and always records the deciding person. |
 | `submitDocument` starts the approval round itself; there is no separate `submitForApproval` | One function for the transaction that numbers a document and starts its approval. |
 | `can(tx, action)` reads the actor from the transaction | The actor always comes from the transaction setting, never from an argument. |
-| Known limitations | **Rule changes:** changing `approval_rules` while documents are waiting changes what "complete" means for their open round, so change the rules only when nothing is pending. **TOTP:** codes can be reused within their 30-second window. **Re-authentication:** changing your own PIN or password needs only a session. |
+| **Second verifier pass:** | |
+| Migration `0023_auth_indexes` | Indexes on `login_attempts(user_id, at)`, `sessions(user_id)` and `sessions(device_id)`. |
+| Migration `0024_auth_approval_hardening` | **Settings** are written only by the owner (§10) or by migrations. **Approval rules** fail closed: a missing rule refuses, where before it approved with no steps. **Approval steps:** a pending step can't change, so it can't carry a fake decider, and a rejection must be decided in the same transaction that rejects the document, so it can't be replayed. **Sign-in records:** a successful sign-in row is only ever the actor's own, so nobody else can reset a lock. A session belongs to its actor and lasts at most 12 hours. |
+| Two locks instead of one | **PIN lock:** five wrong PINs in a row lock the account until management unlocks it, and end its sessions (§11). **Office pause:** five wrong passwords or TOTP codes within 15 minutes pause office sign-in only; sessions and the tablet are untouched. Without the split, anyone with a phone number could lock out the owner and every manager. |
+| Sign-in answers don't reveal accounts | An unknown phone runs a dummy scrypt check. NOT_ALLOWED is shown only after a correct password. A malformed user id on the PIN form returns INVALID. |
+| `pendingFor` leaves out the rounds the user submitted | The database refuses those decisions anyway (0022). |
+| `enableTotp` replacing an existing enrolment needs a code from it | The owner can still reset someone else's, for a lost phone. |
+| `pnpm db:seed-user … --set-password --enrol-totp` | This is how the first owner gets in. The password is prompted for, not typed on the command line; the TOTP secret is printed once. |
+| Plan drift | `tablet_devices` is audited (A9 said it wasn't); its audit rows hold only the token's HMAC. `registered_by` is `created_by`. `switchUser` is part of `startSession`. |
+| The backfill in 0022 | It was checked by hand on a scratch database before the migration was created: a document SUBMITTED before 0020 got its management step and could then be approved. It has no automated test, because the test databases start from all migrations. |
+| Known limitations | **Lockout DoS (R11):** office sign-in can still be paused by a stranger for 15 minutes at a time. **Rule changes:** changing `approval_rules` while documents are waiting changes what "complete" means for their open round, so change the rules only when nothing is pending. **TOTP:** codes can be reused within their 30-second window. **Re-authentication:** changing your own PIN or password needs only a session. |
 
 ## Proof
 

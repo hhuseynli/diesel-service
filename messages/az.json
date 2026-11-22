@@ -1,7 +1,6 @@
 {
   "home": {
     "title": "Highest Service əməliyyat sistemi",
-    "subtitle": "Sistem qurulur. Ekranlar növbəti mərhələlərdə əlavə olunacaq.",
     "signedInAs": "Daxil olan: {name}",
     "roles": "Rollar: {roles}",
     "signOut": "Çıxış",
@@ -21,13 +20,13 @@
     "pinSet": "PIN təyin edildi",
     "passwordSet": "Şifrə təyin edildi",
     "totpEnabled": "İkiaddımlı təsdiq qoşuldu",
-    "lockedAfterFailures": "Ardıcıl səhv cəhdlərdən sonra hesab bloklandı",
     "approvalApproved": "Təsdiq addımı təsdiqləndi",
     "documentApproved": "Sənəd təsdiqləndi",
     "documentSubmitted": "Sənəd təqdim edildi",
     "documentAnnulled": "Sənəd ləğv edildi",
     "documentPosted": "Sənəd qeydə alındı",
-    "tabletRevoked": "Planşet qeydiyyatdan çıxarıldı"
+    "tabletRevoked": "Planşet qeydiyyatdan çıxarıldı",
+    "approvalRoundBackfill": "Köhnə sənəd üçün təsdiq addımları yaradıldı"
   },
   "auth": {
     "signInTitle": "Ofis girişi",
@@ -47,7 +46,8 @@
       "TOTP_NOT_ENROLLED": "İkiaddımlı təsdiq qoşulmayıb. Sahibkara müraciət edin.",
       "UNKNOWN_DEVICE": "Bu cihaz planşet kimi qeydiyyatda deyil.",
       "NOT_ALLOWED": "Bu hesabla buradan daxil olmaq olmaz."
-    }
+    },
+    "phonePlaceholder": "+994501234567"
   },
   "roles": {
     "OWNER": "Sahibkar",

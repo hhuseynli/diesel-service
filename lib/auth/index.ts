@@ -36,13 +36,22 @@ const SIGN_IN_ROLES: Role[] = [
   "CASHIER",
   "BOOKKEEPER",
 ];
-/** Attempt kinds that count towards (and reset) the lock. */
-const CREDENTIAL_KINDS = ["PIN", "PASSWORD", "TOTP"] as const;
+/** Attempt kinds that count towards (and reset) a lock. */
+type CredentialKind = "PIN" | "PASSWORD" | "TOTP";
 
 export type SignInStatus =
   "INVALID" | "LOCKED" | "TOTP_REQUIRED" | "TOTP_NOT_ENROLLED" | "UNKNOWN_DEVICE" | "NOT_ALLOWED";
 export type SignInResult =
   { status: "OK"; token: string; userId: string } | { status: SignInStatus };
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+let dummy: string | undefined;
+/** A hash to check unknown phones against, so they take as long as known ones. */
+function dummyHash(): string {
+  dummy ??= hashSecret(newToken());
+  return dummy;
+}
 
 // --- Setting credentials ---------------------------------------------------------
 
@@ -74,9 +83,33 @@ export async function setPassword(tx: Tx, userId: string, password: string): Pro
   );
 }
 
-/** Enrols a TOTP authenticator; returns the base32 secret to show once as a QR code. */
-export async function enableTotp(tx: Tx, userId: string): Promise<string> {
+export class TotpCodeRequiredError extends Error {}
+
+/**
+ * Enrols a TOTP authenticator; returns the base32 secret to show once as a QR code.
+ * Replacing an existing enrolment needs a current code from it, unless the owner resets
+ * someone else's (lost phone).
+ */
+export async function enableTotp(
+  tx: Tx,
+  userId: string,
+  options: { currentCode?: string } = {},
+): Promise<string> {
   await requireSelfOrAdmin(tx, userId);
+  const { rows } = await tx.execute<{ actor: string; existing: string | null; t: string }>(sql`
+    SELECT current_actor() AS actor, totp_secret_enc AS existing,
+           extract(epoch FROM now())::bigint AS t
+      FROM users WHERE id = ${userId}`);
+  const { actor, existing, t } = rows[0]!;
+  if (existing && actor === userId) {
+    const ok =
+      options.currentCode !== undefined &&
+      verifyTotp(decryptSecret(existing), options.currentCode, Number(t));
+    if (!ok)
+      throw new TotpCodeRequiredError(
+        "Replacing an authenticator needs a code from the current one",
+      );
+  }
   const secret = newTotpSecret();
   await withReason(tx, "audit.totpEnabled", () =>
     tx
@@ -101,19 +134,38 @@ export async function unlockUser(tx: Tx, userId: string, reason: string): Promis
 }
 
 /**
- * Locked: MAX_FAILURES failed PIN, password or TOTP attempts in a row since the last
- * successful one or the last unlock. Computed from login_attempts, never stored.
+ * Two locks, computed from login_attempts, never stored (plan 03, A7):
+ * - PIN_LOCKED: MAX_FAILURES wrong PINs in a row since the last success or unlock. The
+ *   spec's lock (section 11): management unlocks; the user's sessions end.
+ * - OFFICE_PAUSED: MAX_FAILURES wrong passwords or TOTP codes in the last 15 minutes.
+ *   Office sign-in waits; sessions and the tablet are not touched, so a stranger who
+ *   knows a phone number cannot lock the owner and every manager out.
  */
-export async function isLocked(db: Db | Tx, userId: string): Promise<boolean> {
-  const { rows } = await db.execute<{ n: number }>(sql`
-    SELECT count(*)::int AS n FROM login_attempts a
-     WHERE a.user_id = ${userId} AND NOT a.success
-       AND a.kind IN ('PIN', 'PASSWORD', 'TOTP')
-       AND a.at > coalesce((SELECT max(b.at) FROM login_attempts b
-                             WHERE b.user_id = ${userId} AND b.success
-                               AND b.kind IN ('PIN', 'PASSWORD', 'TOTP', 'UNLOCK')), '-infinity')`);
-  return rows[0]!.n >= MAX_FAILURES;
+export type LockState = "NONE" | "PIN_LOCKED" | "OFFICE_PAUSED";
+
+export async function lockState(db: Db | Tx, userId: string): Promise<LockState> {
+  const { rows } = await db.execute<{ pin: number; office: number }>(sql`
+    WITH reset AS (
+      SELECT coalesce(max(b.at), '-infinity') AS at FROM login_attempts b
+       WHERE b.user_id = ${userId} AND b.success
+         AND b.kind IN ('PIN', 'PASSWORD', 'TOTP', 'UNLOCK'))
+    SELECT
+      (SELECT count(*)::int FROM login_attempts a, reset
+        WHERE a.user_id = ${userId} AND NOT a.success AND a.kind = 'PIN' AND a.at > reset.at) AS pin,
+      (SELECT count(*)::int FROM login_attempts a, reset
+        WHERE a.user_id = ${userId} AND NOT a.success AND a.kind IN ('PASSWORD', 'TOTP')
+          AND a.at > greatest(reset.at, now() - interval '15 minutes')) AS office`);
+  const { pin, office } = rows[0]!;
+  return pin >= MAX_FAILURES ? "PIN_LOCKED" : office >= MAX_FAILURES ? "OFFICE_PAUSED" : "NONE";
 }
+
+/** Locked until management unlocks (the PIN lock). */
+export async function isLocked(db: Db | Tx, userId: string): Promise<boolean> {
+  return (await lockState(db, userId)) === "PIN_LOCKED";
+}
+
+const blocks = (state: LockState, kind: CredentialKind) =>
+  state === "PIN_LOCKED" || (state === "OFFICE_PAUSED" && kind !== "PIN");
 
 // --- Sign-in ----------------------------------------------------------------------
 
@@ -146,18 +198,19 @@ async function attempt(
   db: Db,
   userId: string,
   // The check may change the kind, e.g. a right password but a wrong TOTP code.
-  kind: { value: (typeof CREDENTIAL_KINDS)[number] },
+  kind: { value: CredentialKind },
   deviceId: string | undefined,
   check: (tx: Tx) => Promise<SignInStatus | "OK">,
   startAs?: "OFFICE" | "TABLET",
 ): Promise<SignInResult> {
   return withActor(db, { userId }, async (tx) => {
     await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtextextended(${userId}, 0))`);
-    if (await isLocked(tx, userId)) return { status: "LOCKED" } as const;
+    if (blocks(await lockState(tx, userId), kind.value)) return { status: "LOCKED" } as const;
     const outcome = await check(tx);
     if (outcome === "INVALID") {
       await tx.insert(loginAttempts).values({ userId, kind: kind.value, success: false, deviceId });
-      return { status: (await isLocked(tx, userId)) ? "LOCKED" : "INVALID" } as const;
+      const blocked = blocks(await lockState(tx, userId), kind.value);
+      return { status: blocked ? "LOCKED" : "INVALID" } as const;
     }
     if (outcome !== "OK") return { status: outcome } as const;
     await tx.insert(loginAttempts).values({ userId, kind: kind.value, success: true, deviceId });
@@ -215,15 +268,16 @@ export async function signInWithPassword(
 ): Promise<SignInResult> {
   const user = await activeUser(db, eq(users.phone, input.phone.trim()));
   if (!user?.passwordHash) {
+    // The same work as a real check, so the answer time does not reveal the phone exists.
+    verifySecret(input.password, dummyHash());
     await db.insert(loginAttempts).values({ kind: "PASSWORD", success: false });
     return { status: "INVALID" };
   }
   const roles = await rolesOf(db, user.id);
-  if (!roles.some((r) => SIGN_IN_ROLES.includes(r))) return { status: "NOT_ALLOWED" };
   const deviceId = await deviceFor(db, input.deviceToken);
   const needsTotp = roles.some((r) => TOTP_ROLES.includes(r));
 
-  const kind: { value: (typeof CREDENTIAL_KINDS)[number] } = { value: "PASSWORD" };
+  const kind: { value: CredentialKind } = { value: "PASSWORD" };
   return attempt(
     db,
     user.id,
@@ -231,6 +285,8 @@ export async function signInWithPassword(
     deviceId,
     async (tx) => {
       if (!verifySecret(input.password, user.passwordHash!)) return "INVALID";
+      // Only after the right password, so the answer does not tell who has an account.
+      if (!roles.some((r) => SIGN_IN_ROLES.includes(r))) return "NOT_ALLOWED";
       if (!needsTotp) return "OK";
       if (!user.totpSecretEnc) return "TOTP_NOT_ENROLLED";
       if (!input.totpCode) return "TOTP_REQUIRED";
@@ -258,6 +314,8 @@ export async function signInWithPin(
 ): Promise<SignInResult> {
   const deviceId = await deviceFor(db, input.deviceToken);
   if (!deviceId) return { status: "UNKNOWN_DEVICE" };
+  // The user id comes from a form; anything but a uuid is simply not a user.
+  if (!UUID.test(input.userId)) return { status: "INVALID" };
   const user = await activeUser(db, eq(users.id, input.userId));
   if (!user?.pinHash) {
     await db.insert(loginAttempts).values({ kind: "PIN", success: false, deviceId });

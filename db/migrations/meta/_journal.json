@@ -162,6 +162,20 @@
       "when": 1795376032782,
       "tag": "0022_approval_rule_integrity",
       "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1795376854236,
+      "tag": "0023_auth_indexes",
+      "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1795376943219,
+      "tag": "0024_auth_approval_hardening",
+      "breakpoints": true
     }
   ]
 }

@@ -101,6 +101,8 @@ export async function pendingFor(db: Db | Tx, userId: string): Promise<PendingAp
      WHERE a.status = 'PENDING' AND d.status = 'SUBMITTED'
        AND a.required_role <> 'CLIENT'
        AND d.created_by <> ${userId}
+       -- nor the round its user submitted (approvals_guard refuses both)
+       AND a.created_by <> ${userId}
        AND NOT EXISTS (SELECT 1 FROM approvals p
                         WHERE p.document_id = a.document_id AND p.round = a.round
                           AND p.step_no < a.step_no AND p.status <> 'APPROVED')

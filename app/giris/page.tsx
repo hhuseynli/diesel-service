@@ -17,7 +17,13 @@ export default async function SignInPage({
       <form action={signInAction}>
         <label>
           {t("phone")}
-          <input name="phone" type="tel" autoComplete="username" required placeholder="+994..." />
+          <input
+            name="phone"
+            type="tel"
+            autoComplete="username"
+            required
+            placeholder={t("phonePlaceholder")}
+          />
         </label>
         <label>
           {t("password")}
