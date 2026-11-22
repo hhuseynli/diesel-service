@@ -12,3 +12,5 @@ RISKS.md
 plan/
 prompts/
 *.md
+# Rewritten by next dev in its own layout.
+tsconfig.json

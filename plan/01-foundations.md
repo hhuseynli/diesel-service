@@ -241,7 +241,7 @@ Nothing here changes milestone 1. The three conflicts above (landed cost, wareho
 0. **Human prerequisites** (Claude cannot do these):
    - push the initial commit to main and set up branch protection (from the setup session);
    - `brew reinstall --cask docker-desktop` and open Docker once;
-   - after step 3, `cp .env.example .env`, because the hook blocks Claude from writing `.env`.
+   - after step 3, create `.env.example` from the content Claude prepares (the protect-paths hook blocks `.env.*`, which includes `.env.example`), then `cp .env.example .env`.
 1. Commit this plan as `plan/01-foundations.md`.
 2. **Scaffold:** Next.js (App Router, TypeScript, no Tailwind yet), pnpm, Node 22 pin, ESLint, Prettier, next-intl, placeholder page. Run lint and typecheck.
 3. **Database setup:** docker compose, the role init script, `.env.example`. Then `docker compose up -d db` and log in as each role.

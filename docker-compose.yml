@@ -1,0 +1,35 @@
+services:
+  db:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set in .env}
+      POSTGRES_DB: postgres
+      MIGRATOR_PASSWORD: ${MIGRATOR_PASSWORD:?set in .env}
+      APP_PASSWORD: ${APP_PASSWORD:?set in .env}
+      TZ: UTC
+      PGTZ: UTC
+    command:
+      - postgres
+      - -c
+      - max_connections=200
+      - -c
+      - timezone=UTC
+      # Failed statements (denied deletes, locked documents) stay in the server log (plan F1).
+      - -c
+      - log_min_error_statement=error
+    ports:
+      # 5432 is taken by a local Postgres on the dev machine.
+      - "5433:5432"
+    volumes:
+      - db-data:/var/lib/postgresql/data
+      - ./docker/initdb:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d diesel"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+volumes:
+  db-data:
