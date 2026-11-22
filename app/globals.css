@@ -1,0 +1,31 @@
+/* Minimal base until the tablet screens (milestone 4): large touch targets (azerbaijani-ui skill). */
+body {
+  margin: 0;
+  padding: 24px;
+  font-family: system-ui, sans-serif;
+  font-size: 18px;
+  line-height: 1.4;
+}
+
+form {
+  display: grid;
+  gap: 16px;
+  max-width: 420px;
+}
+
+label {
+  display: grid;
+  gap: 6px;
+}
+
+input,
+select,
+button {
+  min-height: 48px;
+  font-size: 18px;
+  padding: 0 12px;
+}
+
+[role="alert"] {
+  color: #b00020;
+}

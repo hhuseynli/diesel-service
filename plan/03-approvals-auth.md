@@ -121,6 +121,23 @@ The screens in this milestone are the minimum: sign-in, PIN switch and a signed-
 | F25 | §11 "locked after repeated wrong PINs" | 5 in a row; management or the owner unlocks (A7). |
 | F26 | §10 office second factor | TOTP app codes for MANAGEMENT and OWNER (A6). |
 | F27 | §6 client approval | Moves to milestone 6 together with message delivery (A1). |
+| F28 | §6 TEHVIL_TESLIM has no approval step | It is signed on screen. A type with an empty rule is approved at submission. |
+| F29 | §10 matrix rows for vehicles, contracts, the handover act, unlocking and tablets | See "Changes during implementation". |
+
+## Changes during implementation
+
+| What | Why |
+| --- | --- |
+| Migrations are `0019_approvals_auth` (generated) and `0020_approval_engine` | Plan 02's second verifier pass took `0018` on the milestone 2 branch. This branch was rebased onto it, and its own `0018` was regenerated as `0019`; that migration had never been applied or pushed. |
+| The tablet idle time is the setting `tablet_idle_seconds` (default 300) | Spec 01's 5 minutes is the default. It can be changed without code, and tests use a short value because the database forces `last_seen_at` to server time. |
+| `lib/auth` is `crypto.ts`, `index.ts` (credentials, sign-in, sessions, tablets) and `context.ts` (cookies, `withSessionActor`) | The plan named `credentials.ts` and `sessions.ts` separately; the functions are the ones listed. |
+| A MANAGEMENT or OWNER account without an enrolled TOTP can't sign in (`TOTP_NOT_ENROLLED`) | §10 requires the second factor. `enableTotp` enrols it (the user themself, or the owner); its screen comes with user management. |
+| Management registers a tablet from the signed-in home page | It is the simplest way to put the device cookie on the tablet's browser. |
+| Permissions not in the §10 matrix: `RECORD_VEHICLE` (FORMEN, MANAGEMENT), `MANAGE_CONTRACTS` (MANAGEMENT), `CREATE_HANDOVER_DOCUMENT` (FORMEN), `UNLOCK_USER` and `REGISTER_TABLET` (MANAGEMENT) | Needed by lib functions from earlier milestones and by sign-in (F29). |
+| TESDIQ_GOZLEYIR → TESDIQLENDI by MANAGEMENT until milestone 6 | §4 says the client triggers it, and client approval arrives in milestone 6 (A1). |
+| Tests that approve documents use MEDAXIL or SATIS instead of QUSUR_AKTI; test approvers hold OWNER | A QUSUR_AKTI step needs the client (A1). OWNER can decide every internal step, which covers the two-step SATIS. |
+| `pnpm test:e2e` builds its own database (`diesel_e2e`) on every run (`e2e/prepare-db.ts`) | The browser tests never touch the dev database, and they start from known staff (`e2e/fixtures.ts`). |
+| `users.locked_at` is set by lib with `now()` | It is server time, but no trigger forces it; that follows the pattern of `user_roles.revoked_at`. |
 
 ## Proof
 

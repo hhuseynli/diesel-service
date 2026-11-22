@@ -1,7 +1,14 @@
 {
   "home": {
     "title": "Highest Service əməliyyat sistemi",
-    "subtitle": "Sistem qurulur. Ekranlar növbəti mərhələlərdə əlavə olunacaq."
+    "subtitle": "Sistem qurulur. Ekranlar növbəti mərhələlərdə əlavə olunacaq.",
+    "signedInAs": "Daxil olan: {name}",
+    "roles": "Rollar: {roles}",
+    "signOut": "Çıxış",
+    "registerTablet": "Bu cihazı planşet kimi qeydiyyata al",
+    "tabletName": "Planşetin adı",
+    "tabletRegistered": "Bu cihaz planşet kimi qeydiyyatdadır.",
+    "switchUser": "İstifadəçini dəyiş"
   },
   "audit": {
     "plateMovedToOtherVehicle": "Nömrə başqa avtomobildə qeydə alındı",
@@ -20,5 +27,33 @@
     "documentSubmitted": "Sənəd təqdim edildi",
     "documentAnnulled": "Sənəd ləğv edildi",
     "documentPosted": "Sənəd qeydə alındı"
+  },
+  "auth": {
+    "signInTitle": "Ofis girişi",
+    "phone": "Telefon",
+    "password": "Şifrə",
+    "totp": "Təsdiq kodu (rəhbərlik və sahibkar üçün)",
+    "signIn": "Daxil ol",
+    "pinTitle": "PIN ilə daxil olun",
+    "who": "Kimsiniz?",
+    "pin": "PIN",
+    "notTablet": "Bu cihaz planşet kimi qeydiyyatda deyil. Ofis girişindən istifadə edin.",
+    "officeLink": "Ofis girişi",
+    "errors": {
+      "INVALID": "Məlumatlar yanlışdır.",
+      "LOCKED": "Hesab bloklanıb. Rəhbərliyə müraciət edin.",
+      "TOTP_REQUIRED": "Təsdiq kodunu daxil edin.",
+      "TOTP_NOT_ENROLLED": "İkiaddımlı təsdiq qoşulmayıb. Sahibkara müraciət edin.",
+      "UNKNOWN_DEVICE": "Bu cihaz planşet kimi qeydiyyatda deyil."
+    }
+  },
+  "roles": {
+    "OWNER": "Sahibkar",
+    "MANAGEMENT": "Rəhbərlik",
+    "FORMEN": "Formen",
+    "WAREHOUSEMAN": "Anbardar",
+    "CASHIER": "Kassir",
+    "BOOKKEEPER": "Mühasib",
+    "MECHANIC": "Təmirçi"
   }
 }
