@@ -13,11 +13,13 @@ import {
   addFinding,
   addPartsRequest,
   addPlannedService,
+  checkOdometer,
   ClientInputError,
   createClient,
   findByQrToken,
   handOver,
   INTAKE_SLOTS,
+  InspectionClosedError,
   IntakePhotoReusedError,
   OdometerReasonRequiredError,
   OwnerQuestionRequiredError,
@@ -45,8 +47,9 @@ function errorKey(e: unknown): string {
   if (e instanceof OpenJobExistsError) return "openJob";
   if (e instanceof FileRejectedError) return "fileRejected";
   if (e instanceof IntakePhotoReusedError) return "photosMissing";
+  if (e instanceof InspectionClosedError) return "conditionsMissing";
   if (e instanceof DbGuardError) return "conditionsMissing";
-  if (e instanceof ClientInputError) return "generic";
+  if (e instanceof ClientInputError) return "invalidInput";
   return "generic";
 }
 
@@ -103,7 +106,7 @@ export async function identifyByVin(form: FormData) {
 export async function createVehicleAction(form: FormData) {
   const vin = text(form, "vin");
   const plate = text(form, "plate");
-  const { id } = await act(`/qebul?nv=${vin}`, (tx) =>
+  const { id, conflicts } = await act(`/qebul?nv=${vin}`, (tx) =>
     createVehicle(tx, {
       vin,
       make: text(form, "make") || undefined,
@@ -115,7 +118,7 @@ export async function createVehicleAction(form: FormData) {
     }),
   );
   // The VIN was just typed from the car, so it needs no separate last-6 confirmation.
-  redirect(`/qebul?v=${id}&ok=1`);
+  redirect(`/qebul?v=${id}&ok=1${conflicts.length ? "&pc=1" : ""}`);
 }
 
 export async function changePlateAction(form: FormData) {
@@ -140,9 +143,19 @@ export async function createClientAction(form: FormData) {
   redirect(`${back}&c=${id}`);
 }
 
+/** A whole number of km, or NaN; an empty field is not 0. */
+function kilometres(value: string): number {
+  return /^\d{1,9}$/.test(value) ? Number(value) : NaN;
+}
+
 export async function uploadIntakePhotos(form: FormData) {
   const back = text(form, "back");
+  const vehicleId = new URLSearchParams(back.split("?")[1]).get("v") ?? "";
+  const km = kilometres(text(form, "km"));
+  const reason = text(form, "reason");
   const ids = await act(back, async (tx) => {
+    // The odometer first: a refused reading should not cost six uploads.
+    await checkOdometer(tx, vehicleId, { valueKm: km, reason });
     const out: string[] = [];
     for (const slot of INTAKE_SLOTS) {
       const file = await fileBytes(form.get(`photo_${slot}`));
@@ -151,7 +164,8 @@ export async function uploadIntakePhotos(form: FormData) {
     }
     return out;
   });
-  redirect(`${back}&p=${ids.join(".")}`);
+  const r = reason ? `&r=${encodeURIComponent(reason)}` : "";
+  redirect(`${back}&p=${ids.join(".")}&km=${km}${r}`);
 }
 
 export async function saveIntake(form: FormData) {
@@ -175,7 +189,10 @@ export async function saveIntake(form: FormData) {
         (typeof INTAKE_SLOTS)[number],
         string
       >,
-      odometer: { valueKm: Number(text(form, "km")), reason: text(form, "reason") || undefined },
+      odometer: {
+        valueKm: kilometres(params.get("km") ?? ""),
+        reason: params.get("r") ?? undefined,
+      },
       confirmation: {
         signerName: text(form, "signerName"),
         signerPhone: text(form, "signerPhone"),
@@ -204,7 +221,6 @@ export async function addFindingAction(form: FormData) {
       mechanicId: text(form, "mechanicId"),
       description: text(form, "description"),
       attachmentIds: ids,
-      additional: text(form, "additional") === "1",
     });
   });
   redirect(back);
@@ -215,7 +231,6 @@ export async function addServiceAction(form: FormData) {
   await act(`/is/${jobId}`, (tx) =>
     addPlannedService(tx, jobId, {
       description: text(form, "description"),
-      additional: text(form, "additional") === "1",
     }),
   );
   redirect(`/is/${jobId}`);
@@ -228,7 +243,6 @@ export async function addPartAction(form: FormData) {
       description: text(form, "description"),
       quantity: text(form, "quantity").replace(",", "."),
       unitHint: text(form, "unit"),
-      additional: text(form, "additional") === "1",
     }),
   );
   redirect(`/is/${jobId}`);

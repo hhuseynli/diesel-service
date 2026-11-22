@@ -288,3 +288,12 @@ export async function odometerAlerts(db: Db | Tx): Promise<OdometerAlert[]> {
     reason: r.reason,
   }));
 }
+
+/** The FRONT intake photo from the vehicle's last visit, to compare at the VIN check (3.2). */
+export async function lastVisitPhoto(db: Db | Tx, vehicleId: string): Promise<string | null> {
+  const { rows } = await db.execute<{ attachment_id: string }>(sql`
+    SELECT p.attachment_id FROM intake_photos p JOIN job_orders j ON j.id = p.job_order_id
+     WHERE j.vehicle_id = ${vehicleId} AND p.slot = 'FRONT'
+     ORDER BY j.created_at DESC LIMIT 1`);
+  return rows[0]?.attachment_id ?? null;
+}

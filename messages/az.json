@@ -72,7 +72,12 @@
     "newCar": "Yeni maşın",
     "empty": "Boşdur",
     "waiting": "{hours} saatdır gözləyir",
-    "noMechanic": "Təmirçi təyin edilməyib"
+    "noMechanic": "Təmirçi təyin edilməyib",
+    "openCount": "{count} açıq iş",
+    "summary": "Statuslar",
+    "late": "Gecikir",
+    "noJobs": "Açıq iş sifarişi yoxdur.",
+    "hours": "{hours} saat"
   },
   "status": {
     "QEBUL": "Qəbul",
@@ -169,7 +174,22 @@
       "FORMER": "köhnə nömrə, {date} tarixinədək",
       "UNCONFIRMED": "təsdiqlənməmiş nömrə"
     },
-    "plateResult": "{plate} ({label}) · {vehicle} · VIN {vin}"
+    "plateResult": "{plate} ({label}) · {vehicle} · VIN {vin}",
+    "steps": {
+      "vehicle": "Maşın",
+      "client": "Müştəri",
+      "photos": "Şəkillər",
+      "confirm": "Təhvil"
+    },
+    "byQr": "Stiker ilə",
+    "byVin": "VIN ilə",
+    "byPlate": "Nömrə ilə",
+    "last6": "Son 6 simvol",
+    "photosHint": "Hər tərəfi kamera ilə çəkin. Altı şəklin hamısı lazımdır.",
+    "lastVisitPhoto": "Son ziyarətdəki şəkil",
+    "stepOf": "Addım {n} / 4",
+    "summary": "Yürüş: {km} km",
+    "kmFirst": "Bu maşın üçün ilk yürüş qeydi."
   },
   "job": {
     "title": "İş sifarişi {number}",
@@ -225,7 +245,16 @@
     "byMechanic": "Təmirçi: {name}",
     "partLine": "{description} — {quantity} {unit}",
     "removedLine": "{description} — {disposition}",
-    "additionalLine": "{description} (təmir zamanı əlavə)"
+    "additionalLine": "{description} (təmir zamanı əlavə)",
+    "back": "İş sifarişləri",
+    "nextStep": "Növbəti addım",
+    "nothingYet": "Hələ yoxdur",
+    "duringWork": "Təmir zamanı əlavə",
+    "progress": "Gediş",
+    "facts": "Məlumat",
+    "stickerSection": "QR stiker",
+    "addFindingTitle": "Yeni nasazlıq",
+    "waitingTitle": "Gözlənilir"
   },
   "sticker": {
     "title": "QR stiker",
@@ -244,6 +273,12 @@
     "findingNeedsPhoto": "Hər nasazlığa ən azı bir şəkil və ya video lazımdır.",
     "conditionsMissing": "Bu addım üçün şərtlər tamamlanmayıb.",
     "signatureMissing": "İmza atılmayıb.",
-    "notFound": "Maşın tapılmadı."
+    "notFound": "Maşın tapılmadı.",
+    "invalidInput": "Məlumat düzgün daxil edilməyib. Yoxlayıb yenidən göndərin."
+  },
+  "app": {
+    "brand": "Diesel Motors",
+    "tagline": "Servis idarəetməsi",
+    "switchUser": "Dəyiş"
   }
 }

@@ -44,6 +44,9 @@ export class OwnerQuestionRequiredError extends Error {
   }
 }
 
+/** Input the formen can correct (a malformed value), as opposed to a refused rule. */
+export class ClientInputError extends Error {}
+
 export class OdometerReasonRequiredError extends Error {
   constructor(readonly previousKm: number) {
     super(`The odometer is below the last reading (${previousKm} km): a reason is required`);
@@ -83,6 +86,29 @@ export async function lastClientOf(db: Db | Tx, vehicleId: string): Promise<stri
 }
 
 /**
+ * The odometer at intake (3.4; R9): whole kilometres, and a reason when it is below the
+ * vehicle's last reading. Checked on the photo step and again at "Saxla".
+ */
+export async function checkOdometer(
+  db: Db | Tx,
+  vehicleId: string,
+  odometer: { valueKm: number; reason?: string },
+): Promise<void> {
+  if (!Number.isSafeInteger(odometer.valueKm) || odometer.valueKm < 0) {
+    throw new ClientInputError("The odometer is a whole number of kilometres");
+  }
+  const [previous] = await db
+    .select({ valueKm: odometerReadings.valueKm })
+    .from(odometerReadings)
+    .where(eq(odometerReadings.vehicleId, vehicleId))
+    .orderBy(desc(odometerReadings.createdAt))
+    .limit(1);
+  if (previous && odometer.valueKm < previous.valueKm && !odometer.reason?.trim()) {
+    throw new OdometerReasonRequiredError(previous.valueKm);
+  }
+}
+
+/**
  * "Saxla" at the end of intake (spec 01, 3.2-3.5): opens the job in QEBUL with its six
  * photos, the odometer reading and the confirmation, all in one transaction.
  */
@@ -105,15 +131,7 @@ export async function receiveVehicle(tx: Tx, input: ReceiveInput): Promise<Recei
   const asked = lastClient !== null && lastClient !== input.contragentId;
   if (asked && input.ownerChanged === undefined) throw new OwnerQuestionRequiredError(lastClient);
 
-  const [previous] = await tx
-    .select({ valueKm: odometerReadings.valueKm })
-    .from(odometerReadings)
-    .where(eq(odometerReadings.vehicleId, input.vehicleId))
-    .orderBy(desc(odometerReadings.createdAt))
-    .limit(1);
-  if (previous && input.odometer.valueKm < previous.valueKm && !input.odometer.reason?.trim()) {
-    throw new OdometerReasonRequiredError(previous.valueKm);
-  }
+  await checkOdometer(tx, input.vehicleId, input.odometer);
 
   const job = await openJob(tx, { ...input, ownerChanged: asked ? input.ownerChanged : undefined });
   await tx.insert(intakePhotos).values(
@@ -171,12 +189,44 @@ export async function receiveVehicle(tx: Tx, input: ReceiveInput): Promise<Recei
 
 // --- Inspection (spec 01, 3.6) -----------------------------------------------------
 
+/** Findings, services and parts are added from intake until the work is done. */
+export class InspectionClosedError extends Error {}
+
+const OPEN_FOR_FINDINGS = [
+  "QEBUL",
+  "BAXIS",
+  "QIYMETLENDIRME",
+  "TESDIQ_GOZLEYIR",
+  "TESDIQLENDI",
+  "HISSE_GOZLEYIR",
+  "TEMIRDE",
+];
+/** From here the estimate is with the client: anything new is an ELAVE_AKT request. */
+const ESTIMATE_SENT = ["TESDIQ_GOZLEYIR", "TESDIQLENDI", "HISSE_GOZLEYIR", "TEMIRDE"];
+
+/**
+ * Whether what is recorded now is additional or part of the inspection (spec 01, 3.6-3.7).
+ * Decided from the job's status, never by the screen; the row lock keeps the status from
+ * changing until the transaction ends.
+ */
+async function inspectionStage(tx: Tx, jobId: string): Promise<{ additional: boolean }> {
+  const { rows } = await tx.execute<{ status: string }>(
+    sql`SELECT status FROM job_orders WHERE id = ${jobId} FOR SHARE`,
+  );
+  const status = rows[0]?.status ?? "";
+  if (!OPEN_FOR_FINDINGS.includes(status)) {
+    throw new InspectionClosedError(`Nothing is added to a job in ${status || "no status"}`);
+  }
+  return { additional: ESTIMATE_SENT.includes(status) };
+}
+
 export async function addFinding(
   tx: Tx,
   jobId: string,
-  input: { mechanicId: string; description: string; attachmentIds: string[]; additional?: boolean },
+  input: { mechanicId: string; description: string; attachmentIds: string[] },
 ): Promise<string> {
   await requirePermission(tx, "RECORD_INSPECTION");
+  const { additional } = await inspectionStage(tx, jobId);
   if (input.attachmentIds.length === 0) {
     throw new Error("A finding needs at least one photo or video (R2)");
   }
@@ -186,7 +236,7 @@ export async function addFinding(
       jobOrderId: jobId,
       mechanicId: input.mechanicId,
       description: input.description.trim(),
-      additional: input.additional ?? false,
+      additional,
     })
     .returning({ id: inspectionFindings.id });
   await tx
@@ -198,16 +248,17 @@ export async function addFinding(
 export async function addPlannedService(
   tx: Tx,
   jobId: string,
-  input: { description: string; mechanicId?: string; additional?: boolean },
+  input: { description: string; mechanicId?: string },
 ): Promise<string> {
   await requirePermission(tx, "RECORD_INSPECTION");
+  const { additional } = await inspectionStage(tx, jobId);
   const [row] = await tx
     .insert(plannedServices)
     .values({
       jobOrderId: jobId,
       description: input.description.trim(),
       mechanicId: input.mechanicId,
-      additional: input.additional ?? false,
+      additional,
     })
     .returning({ id: plannedServices.id });
   return row!.id;
@@ -216,9 +267,10 @@ export async function addPlannedService(
 export async function addPartsRequest(
   tx: Tx,
   jobId: string,
-  input: { description: string; quantity: string; unitHint?: string; additional?: boolean },
+  input: { description: string; quantity: string; unitHint?: string },
 ): Promise<string> {
   await requirePermission(tx, "RECORD_INSPECTION");
+  const { additional } = await inspectionStage(tx, jobId);
   const [row] = await tx
     .insert(partsRequests)
     .values({
@@ -226,7 +278,7 @@ export async function addPartsRequest(
       description: input.description.trim(),
       quantity: Quantity.parse(input.quantity).toDb(),
       unitHint: input.unitHint?.trim() || null,
-      additional: input.additional ?? false,
+      additional,
     })
     .returning({ id: partsRequests.id });
   return row!.id;
@@ -362,8 +414,6 @@ export async function reprintSticker(tx: Tx, vehicleId: string, reason: string):
 }
 
 // --- Clients at intake (spec 01, 3.3) ------------------------------------------------
-
-export class ClientInputError extends Error {}
 
 /** A new client from the intake screen; a legal entity needs its 10-digit VÖEN. */
 export async function createClient(

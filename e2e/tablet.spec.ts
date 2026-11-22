@@ -79,18 +79,19 @@ async function sign(where = main()) {
   await page.mouse.up();
 }
 
-async function takePhotos() {
+/** The photo step: six photos and the odometer next to them (3.4), then "Davam et". */
+async function takePhotos(km: string, reason?: string) {
   await expect(main().getByRole("heading", { level: 1 })).toHaveText(az.intake.photos);
   for (const [slot, label] of Object.entries(az.intake.slot)) {
     await page.getByLabel(label, { exact: true }).setInputFiles(photo(slot));
   }
+  await page.getByLabel(az.intake.odometer).fill(km);
+  if (reason) await page.getByLabel(az.intake.reason).fill(reason);
   await page.getByRole("button", { name: az.intake.continue }).click();
 }
 
-/** The last intake step: odometer, complaints, the driver's signature, "Saxla". */
-async function fillAndSave(km: string, reason?: string) {
-  await page.getByLabel(az.intake.odometer).fill(km);
-  if (reason) await page.getByLabel(az.intake.reason).fill(reason);
+/** The last intake step: complaints, the driver's signature, "Saxla". */
+async function fillAndSave() {
   await page.getByLabel(az.intake.complaints).fill("Əyləc pedalı yumşaqdır");
   await page.getByLabel(az.intake.mechanicOptional).selectOption({ label: MECHANIC.name });
   await page.getByLabel(az.intake.signerName).fill("Əli Məmmədov");
@@ -100,8 +101,8 @@ async function fillAndSave(km: string, reason?: string) {
 }
 
 async function photosAndSave(km: string) {
-  await takePhotos();
-  await fillAndSave(km);
+  await takePhotos(km);
+  await fillAndSave();
   await expect(page).toHaveURL(/\/is\/[0-9a-f-]{36}\?yeni=1/);
 }
 
@@ -243,11 +244,12 @@ test("the car returns: found by its sticker, last client offered, lower odometer
   await findBySticker(stickerToken);
   await expect(main().getByText(/Son ziyarətdəki müştəri: Əli Məmmədov/)).toBeVisible();
   await main().getByRole("link", { name: az.intake.choose }).click();
-  await takePhotos();
   await expect(main().getByText(/Əvvəlki yürüş: 120 000 km/)).toBeVisible();
-  await fillAndSave("110000");
+  // Lower than last time: refused on the photo step, before anything is uploaded.
+  await takePhotos("110000");
   await expect(main().getByRole("alert")).toHaveText(az.errors.odometerReason);
-  await fillAndSave("110000", "Panel dəyişdirilib");
+  await takePhotos("110000", "Panel dəyişdirilib");
+  await fillAndSave();
   await expect(page).toHaveURL(/\/is\/[0-9a-f-]{36}\?yeni=1&od=1/);
   await expect(main().getByRole("alert")).toHaveText(az.job.odometerFlagged);
 });

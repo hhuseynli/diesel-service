@@ -1,5 +1,6 @@
 import "server-only";
 import { cookies } from "next/headers";
+import { redirect } from "next/navigation";
 import { getDb } from "@/lib/db/client";
 import type { Tx } from "@/lib/db/types";
 import { validateSession, withSessionUser, type SessionUser } from "./index";
@@ -16,6 +17,16 @@ export async function getSessionUser(): Promise<SessionUser | null> {
   const store = await cookies();
   const token = store.get(SESSION_COOKIE)?.value;
   return token ? validateSession(getDb(), token, store.get(DEVICE_COOKIE)?.value) : null;
+}
+
+/**
+ * The signed-in user, or a redirect to sign-in. Every screen that reads data calls this
+ * itself: a layout's check does not guard the page, which Next renders in parallel.
+ */
+export async function requireSessionUser(): Promise<SessionUser> {
+  const user = await getSessionUser();
+  if (!user) redirect("/");
+  return user;
 }
 
 export async function getDeviceToken(): Promise<string | undefined> {
