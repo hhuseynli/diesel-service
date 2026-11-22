@@ -1,0 +1,14 @@
+pnpm-lock.yaml
+.next/
+out/
+coverage/
+playwright-report/
+test-results/
+db/migrations/
+# Human-owned documents keep their own formatting.
+intent/
+spec/
+RISKS.md
+plan/
+prompts/
+*.md
