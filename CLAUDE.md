@@ -22,6 +22,15 @@ migrations, Vitest, Playwright. pnpm.
 - E2E: `pnpm test:e2e`
 - Lint and types: `pnpm lint && pnpm typecheck`
 - New migration: `pnpm db:new <name>`; apply: `pnpm db:migrate`
+  - Schema changes: edit `db/schema/`, then `pnpm db:new <name>` generates the SQL.
+  - Hand-written SQL (triggers, grants, data): draft it in `db/drafts/<name>.sql`
+    (gitignored), then `pnpm db:new <name> --from db/drafts/<name>.sql`.
+    Never write to a migration file after it exists; fix mistakes with a new one.
+  - New tables need grants and triggers in their migration; `tests/db/catalog.db.test.ts`
+    fails otherwise.
+- Migration checks: `pnpm db:check` (append-only, and db/schema matches migrations)
+- Seed a staff account: `pnpm db:seed-user --name "..." --phone +994... --role CASHIER`
+- Dev Postgres is on localhost:5433. Writes go through `withActor()` in `lib/audit`.
 
 Run lint, typecheck and the affected tests before reporting any task done,
 and paste the output. If a test fails, fix the code, not the test.
