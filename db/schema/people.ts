@@ -27,6 +27,12 @@ export const users = pgTable(
     phone: text("phone").notNull().unique(),
     email: text("email"),
     pinHash: text("pin_hash"),
+    // Office sign-in (plan 03, A6). Never copied into audit_log.
+    passwordHash: text("password_hash"),
+    totpSecretEnc: text("totp_secret_enc"),
+    // Set after repeated wrong PINs or passwords; management unlocks (plan 03, A7).
+    lockedAt: timestamp("locked_at", { withTimezone: true }),
+    lockReason: text("lock_reason"),
     isActive: boolean("is_active").notNull().default(true),
     isSystem: boolean("is_system").notNull().default(false),
     createdAt: createdAt(),
@@ -35,6 +41,7 @@ export const users = pgTable(
   (t) => [
     check("users_phone_format", sql`${t.phone} ~ '^\\+[0-9]{8,15}$'`),
     check("users_full_name_not_blank", sql`btrim(${t.fullName}) <> ''`),
+    check("users_lock_reason", sql`(${t.lockedAt} IS NULL) = (${t.lockReason} IS NULL)`),
     uniqueIndex("users_one_system_user")
       .on(t.isSystem)
       .where(sql`${t.isSystem}`),
