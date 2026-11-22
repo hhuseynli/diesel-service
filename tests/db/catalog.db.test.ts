@@ -118,7 +118,9 @@ describe("catalog", () => {
     expect(await triggersOf("audit_log")).toContain("forbid_update");
     expect(await triggersOf("attachments")).toContain("forbid_update");
     expect(await triggersOf("document_counters")).toContain("document_counters_guard");
-    expect(await triggersOf("job_status_events")).toContain("forbid_update");
+    expect(await triggersOf("job_status_events")).toEqual(
+      expect.arrayContaining(["forbid_update", "job_status_events_from_trigger"]),
+    );
     expect(await triggersOf("job_orders")).toEqual(
       expect.arrayContaining([
         "job_orders_guard",

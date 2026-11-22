@@ -10,6 +10,7 @@
     "seedUser": "İşçi hesabı ilkin quraşdırma ilə yaradıldı",
     "jobOpened": "İş sifarişi açıldı",
     "jobClosed": "İş sifarişi bağlandı: ödənilib və təhvil verilib",
+    "contractEnded": "Müqavilə bitdiyi üçün maşın yeni müqaviləyə keçirildi",
     "documentSubmitted": "Sənəd təqdim edildi",
     "documentAnnulled": "Sənəd ləğv edildi",
     "documentPosted": "Sənəd qeydə alındı"

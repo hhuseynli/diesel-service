@@ -1,9 +1,10 @@
-import { and, asc, eq, isNull, notInArray } from "drizzle-orm";
+import { and, asc, eq, inArray, isNull, notInArray } from "drizzle-orm";
 import { jobOrders, jobStatusEvents, userRoles } from "@/db/schema";
 import { withReason } from "@/lib/audit";
 import { checkContract } from "@/lib/contracts";
 import type { Db, Tx } from "@/lib/db/types";
 import { assignNumber } from "@/lib/numbering";
+import type { Role } from "@/lib/users/roles";
 import {
   TERMINAL_JOB_STATUSES,
   type ContractCheck,
@@ -31,8 +32,8 @@ export class OpenJobExistsError extends Error {
   }
 }
 
-/** The chosen mechanic does not hold an active MECHANIC role. */
-export class NotAMechanicError extends Error {}
+/** The chosen formen or mechanic does not hold the role for it. */
+export class WrongRoleError extends Error {}
 
 export interface OpenJobInput {
   vehicleId: string;
@@ -58,23 +59,17 @@ export async function openJob(
     .where(
       and(
         eq(jobOrders.vehicleId, input.vehicleId),
+        eq(jobOrders.carReleased, false),
         notInArray(jobOrders.status, [...TERMINAL_JOB_STATUSES]),
       ),
     );
   if (open) throw new OpenJobExistsError(open.id);
 
-  if (input.mechanicId) {
-    const [role] = await tx
-      .select({ id: userRoles.id })
-      .from(userRoles)
-      .where(
-        and(
-          eq(userRoles.userId, input.mechanicId),
-          eq(userRoles.role, "MECHANIC"),
-          isNull(userRoles.revokedAt),
-        ),
-      );
-    if (!role) throw new NotAMechanicError(`User ${input.mechanicId} is not a mechanic`);
+  if (!(await hasRole(tx, input.formenId, ["FORMEN", "OWNER"]))) {
+    throw new WrongRoleError(`User ${input.formenId} is not a formen`);
+  }
+  if (input.mechanicId && !(await hasRole(tx, input.mechanicId, ["MECHANIC"]))) {
+    throw new WrongRoleError(`User ${input.mechanicId} is not a mechanic`);
   }
 
   const { check, contractId } = await checkContract(tx, input);
@@ -101,6 +96,31 @@ export async function openJob(
   return { id: job!.id, number, contractCheck: check };
 }
 
+async function hasRole(tx: Tx, userId: string, roles: Role[]): Promise<boolean> {
+  const [row] = await tx
+    .select({ id: userRoles.id })
+    .from(userRoles)
+    .where(
+      and(
+        eq(userRoles.userId, userId),
+        inArray(userRoles.role, roles),
+        isNull(userRoles.revokedAt),
+      ),
+    );
+  return Boolean(row);
+}
+
+/** Locks the job row and returns its status; a job that does not exist is an error. */
+async function lockJob(tx: Tx, jobId: string): Promise<JobStatus> {
+  const [job] = await tx
+    .select({ status: jobOrders.status })
+    .from(jobOrders)
+    .where(eq(jobOrders.id, jobId))
+    .for("update");
+  if (!job) throw new Error(`Job order ${jobId} not found`);
+  return job.status as JobStatus;
+}
+
 async function setStatus(tx: Tx, jobId: string, status: JobStatus, reason: string) {
   await withReason(tx, reason, () =>
     tx.update(jobOrders).set({ status }).where(eq(jobOrders.id, jobId)),
@@ -119,6 +139,10 @@ export async function moveJob(
   reason: string,
 ): Promise<JobStatus> {
   if (reason.trim() === "") throw new Error("A status change needs a reason");
+  // Locking first makes a second, concurrent move to the same status fail instead of
+  // silently doing nothing.
+  const current = await lockJob(tx, jobId);
+  if (current === to) throw new Error(`Job ${jobId} is already ${to}`);
   await setStatus(tx, jobId, to, reason);
 
   if (to === "ODENILDI" || to === "TEHVIL_VERILDI") {
@@ -138,12 +162,31 @@ export async function moveJob(
 /** Cancels a job (LEGV) with a reason; not possible after handover or payment. */
 export async function cancelJob(tx: Tx, jobId: string, reason: string): Promise<void> {
   if (reason.trim() === "") throw new Error("Cancelling a job needs a reason");
+  await lockJob(tx, jobId);
   await withReason(tx, reason, () =>
     tx
       .update(jobOrders)
       .set({ status: "LEGV", cancelReason: reason })
       .where(eq(jobOrders.id, jobId)),
   );
+}
+
+/**
+ * Releases a job held for management (spec 01, 3.3; plan 02, C3): it continues as a
+ * separate paid job. The audit row records who decided and why. The management role
+ * check arrives with permissions in milestone 3.
+ */
+export async function resolveHold(tx: Tx, jobId: string, reason: string): Promise<void> {
+  if (reason.trim() === "") throw new Error("Resolving a hold needs a reason");
+  await lockJob(tx, jobId);
+  const updated = await withReason(tx, reason, () =>
+    tx
+      .update(jobOrders)
+      .set({ contractDecision: "SEPARATE_PAID" })
+      .where(and(eq(jobOrders.id, jobId), eq(jobOrders.contractDecision, "HOLD_FOR_MANAGEMENT")))
+      .returning({ id: jobOrders.id }),
+  );
+  if (updated.length === 0) throw new Error(`Job ${jobId} is not held for management`);
 }
 
 /** The job's status history, oldest first. */

@@ -1,6 +1,20 @@
 import { sql } from "drizzle-orm";
-import { bigint, check, pgTable, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core";
-import { CONTRACT_CHECKS, CONTRACT_DECISIONS, JOB_STATUSES } from "@/lib/jobs/types";
+import {
+  bigint,
+  boolean,
+  check,
+  pgTable,
+  text,
+  timestamp,
+  uniqueIndex,
+  uuid,
+} from "drizzle-orm/pg-core";
+import {
+  CONTRACT_CHECKS,
+  CONTRACT_DECISIONS,
+  JOB_STATUSES,
+  TERMINAL_JOB_STATUSES,
+} from "@/lib/jobs/types";
 import { createdAt, id, oneOf, sqlList } from "./columns";
 import { contracts } from "./contracts";
 import { contragents } from "./contragents";
@@ -33,6 +47,8 @@ export const jobOrders = pgTable(
     vinSnapshot: text("vin_snapshot"),
     plateSnapshot: text("plate_snapshot"),
     cancelReason: text("cancel_reason"),
+    // Set by the database on handover (TEHVIL_VERILDI) and never unset: the car has left.
+    carReleased: boolean("car_released").notNull().default(false),
     createdAt: createdAt(),
     createdBy: createdBy(),
   },
@@ -49,10 +65,11 @@ export const jobOrders = pgTable(
       "job_orders_cancel_reason",
       sql`(${t.status} = 'LEGV') = (${t.cancelReason} IS NOT NULL AND btrim(${t.cancelReason}) <> '')`,
     ),
-    // One open job per car (spec 01, section 3.2.3).
+    // One job per car at the workshop (spec 01, section 3.2.3). A job handed over and
+    // waiting for deferred payment no longer holds the car (plan 02, F23).
     uniqueIndex("job_orders_one_open_per_vehicle")
       .on(t.vehicleId)
-      .where(sql`${t.status} NOT IN ('BAGLANDI', 'LEGV')`),
+      .where(sql`NOT ${t.carReleased} AND ${t.status} NOT IN (${sqlList(TERMINAL_JOB_STATUSES)})`),
   ],
 );
 

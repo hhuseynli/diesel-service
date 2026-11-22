@@ -2,7 +2,7 @@
 // opening jobs, and documents tied to a job's vehicle.
 import { eq } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { contractVehicles, contracts, documents } from "@/db/schema";
+import { contractVehicles, contracts, documents, jobOrders } from "@/db/schema";
 import { withActor } from "@/lib/audit";
 import {
   addVehicle,
@@ -17,7 +17,8 @@ import {
 } from "@/lib/contracts";
 import { ImmutableError } from "@/lib/db/errors";
 import { createDraft } from "@/lib/documents";
-import { ContractDecisionRequiredError, NotAMechanicError } from "@/lib/jobs";
+import { assignNumber } from "@/lib/numbering";
+import { ContractDecisionRequiredError, WrongRoleError } from "@/lib/jobs";
 import { recordPlate } from "@/lib/vehicles";
 import { createUser } from "./fixtures";
 import { createTestDb, type TestDb } from "./helpers";
@@ -213,7 +214,12 @@ describe("importing a contract's vehicle list", () => {
         { vin: known.vin, plate: "50-OLD-50" },
       ]),
     );
-    expect(result).toEqual({ added: 2, alreadyOnContract: 0, createdVehicles: 1 });
+    expect(result).toEqual({
+      added: 2,
+      alreadyOnContract: 0,
+      createdVehicles: 1,
+      plateConflicts: [],
+    });
 
     const { rows: plates } = await t.migratorPool.query(
       `SELECT v.vin, vp.plate_display, vp.source, vp.status FROM vehicle_plates vp
@@ -233,12 +239,23 @@ describe("importing a contract's vehicle list", () => {
       ]),
     );
     expect(plates).toHaveLength(2);
+    // The list's plate for a known car is kept for reference only (C4).
+    const { rows: listed } = await t.migratorPool.query(
+      "SELECT contract_plate FROM contract_vehicles WHERE vehicle_id = $1 AND contract_id = $2",
+      [known.id, c],
+    );
+    expect(listed).toEqual([{ contract_plate: "50-OLD-50" }]);
     expect((await check(known.id, company)).check).toBe("ON_CONTRACT");
 
     const again = await withActor(t.db, { userId: manager }, (tx) =>
       importVehicleList(tx, c, [{ vin: known.vin }]),
     );
-    expect(again).toEqual({ added: 0, alreadyOnContract: 1, createdVehicles: 0 });
+    expect(again).toEqual({
+      added: 0,
+      alreadyOnContract: 1,
+      createdVehicles: 0,
+      plateConflicts: [],
+    });
   });
 });
 
@@ -295,7 +312,7 @@ describe("opening a job", () => {
         contragentId: person,
         mechanicId: cashier,
       }),
-    ).rejects.toBeInstanceOf(NotAMechanicError);
+    ).rejects.toBeInstanceOf(WrongRoleError);
     await newJob(t.db, manager, {
       vehicleId: (await newVehicle(t.db, manager, "CNTRCT")).id,
       contragentId: person,
@@ -322,5 +339,195 @@ describe("documents on a job are about the job's vehicle", () => {
         createDraft(tx, { type: "QUSUR_AKTI", jobOrderId: job.id, vehicleId: other.id }),
       ),
     ).rejects.toBeInstanceOf(ImmutableError);
+  });
+});
+
+describe("contracts end and renew (review of plan 02)", () => {
+  it("a renewal contract takes over the cars of an ended one", async () => {
+    const company = await newClient(t.db, manager, "HUQUQI");
+    const old = await contract(company);
+    const car = await newVehicle(t.db, manager, "CNTRCT");
+    await add(old, car.id);
+    await withActor(t.db, { userId: manager }, (tx) => terminateContract(tx, old, "Yenilənir"));
+    expect((await check(car.id, company)).check).toBe("CONTRACT_EXPIRED");
+
+    const renewal = await contract(company);
+    await add(renewal, car.id);
+    expect(await check(car.id, company)).toEqual({ check: "ON_CONTRACT", contractId: renewal });
+    const { rows } = await t.migratorPool.query(
+      "SELECT remove_reason, removed_by FROM contract_vehicles WHERE contract_id = $1",
+      [old],
+    );
+    expect(rows).toEqual([{ remove_reason: "audit.contractEnded", removed_by: manager }]);
+  });
+
+  it("an ended contract takes no new cars", async () => {
+    const c = await contract(await newClient(t.db, manager, "HUQUQI"));
+    await withActor(t.db, { userId: manager }, (tx) => terminateContract(tx, c, "Bitdi"));
+    await expect(add(c, (await newVehicle(t.db, manager, "CNTRCT")).id)).rejects.toBeInstanceOf(
+      ImmutableError,
+    );
+  });
+
+  it("the database sets the removal date and remover, whatever the app sends", async () => {
+    const c = await contract(await newClient(t.db, manager, "HUQUQI"));
+    const car = await newVehicle(t.db, manager, "CNTRCT");
+    const rowId = await add(c, car.id);
+    await withActor(t.db, { userId: manager, reason: "Satılıb" }, (tx) =>
+      tx
+        .update(contractVehicles)
+        .set({
+          removedOn: "2000-01-01",
+          removedBy: "00000000-0000-0000-0000-000000000001",
+          removeReason: "Satılıb",
+        })
+        .where(eq(contractVehicles.id, rowId)),
+    );
+    const [row] = await t.db.select().from(contractVehicles).where(eq(contractVehicles.id, rowId));
+    expect(row).toMatchObject({ removedOn: days.today, removedBy: manager, addedOn: days.today });
+  });
+
+  it("removing a car that is not on the contract is an error", async () => {
+    const c = await contract(await newClient(t.db, manager, "HUQUQI"));
+    const car = await newVehicle(t.db, manager, "CNTRCT");
+    await expect(
+      withActor(t.db, { userId: manager }, (tx) => removeVehicle(tx, c, car.id, "x")),
+    ).rejects.toThrow(/not on this contract/);
+    await add(c, car.id);
+    await withActor(t.db, { userId: manager }, (tx) => removeVehicle(tx, c, car.id, "Satılıb"));
+    await expect(
+      withActor(t.db, { userId: manager }, (tx) => removeVehicle(tx, c, car.id, "yenə")),
+    ).rejects.toThrow(/not on this contract/);
+  });
+
+  it("a client whose contracts have all ended gets NO_CONTRACT for an unlisted car", async () => {
+    const company = await newClient(t.db, manager, "HUQUQI");
+    await contract(company, {
+      signedOn: "2025-01-01",
+      validFrom: "2025-01-01",
+      validTo: days.yesterday,
+    });
+    const car = await newVehicle(t.db, manager, "CNTRCT");
+    expect((await check(car.id, company)).check).toBe("NO_CONTRACT");
+  });
+
+  it("an annulled contract is ignored", async () => {
+    const company = await newClient(t.db, manager, "HUQUQI");
+    const c = await contract(company);
+    const car = await newVehicle(t.db, manager, "CNTRCT");
+    await add(c, car.id);
+    await withActor(t.db, { userId: manager, reason: "Səhv daxil edilib" }, (tx) =>
+      tx
+        .update(contracts)
+        .set({ status: "ANNULLED", statusReason: "Səhv daxil edilib" })
+        .where(eq(contracts.id, c)),
+    );
+    expect((await check(car.id, company)).check).toBe("NO_CONTRACT");
+  });
+
+  it("the import reports plates it moved off other cars", async () => {
+    const holder = await newVehicle(t.db, manager, "CNTRCT", "66-PL-666");
+    const c = await contract(await newClient(t.db, manager, "HUQUQI"));
+    const result = await withActor(t.db, { userId: manager }, (tx) =>
+      importVehicleList(tx, c, [{ vin: "XTC65115RE0000888", plate: "66 PL 666" }]),
+    );
+    expect(result.plateConflicts).toEqual([{ vehicleId: holder.id, vin: holder.vin }]);
+  });
+
+  it("contract changes are audited with user and reason", async () => {
+    const c = await contract(await newClient(t.db, manager, "HUQUQI"));
+    await withActor(t.db, { userId: manager }, (tx) =>
+      terminateContract(tx, c, "Müştəri imtina etdi"),
+    );
+    const { rows } = await t.migratorPool.query(
+      `SELECT action, user_id, reason, after->>'status' AS status FROM audit_log
+        WHERE table_name = 'contracts' AND record_id = $1 ORDER BY id`,
+      [c],
+    );
+    expect(rows).toEqual([
+      { action: "INSERT", user_id: manager, reason: null, status: "ACTIVE" },
+      { action: "UPDATE", user_id: manager, reason: "Müştəri imtina etdi", status: "TERMINATED" },
+    ]);
+  });
+});
+
+describe("job contract links and roles (review of plan 02)", () => {
+  it("CONTRACT_EXPIRED needs a decision too, and SEPARATE_PAID is stored", async () => {
+    const company = await newClient(t.db, manager, "HUQUQI");
+    const c = await contract(company, {
+      signedOn: "2025-01-01",
+      validFrom: "2025-01-01",
+      validTo: days.yesterday,
+    });
+    const car = await newVehicle(t.db, manager, "CNTRCT");
+    await add(c, car.id);
+    await expect(
+      newJob(t.db, manager, { vehicleId: car.id, contragentId: company }),
+    ).rejects.toEqual(new ContractDecisionRequiredError("CONTRACT_EXPIRED"));
+    const job = await newJob(t.db, manager, {
+      vehicleId: car.id,
+      contragentId: company,
+      contractDecision: "SEPARATE_PAID",
+    });
+    const { rows } = await t.migratorPool.query(
+      "SELECT contract_id, contract_check, contract_decision FROM job_orders WHERE id = $1",
+      [job.id],
+    );
+    expect(rows[0]).toEqual({
+      contract_id: null,
+      contract_check: "CONTRACT_EXPIRED",
+      contract_decision: "SEPARATE_PAID",
+    });
+  });
+
+  it("the database refuses a job linked to another client's contract", async () => {
+    const company = await newClient(t.db, manager, "HUQUQI");
+    const stranger = await newClient(t.db, manager, "HUQUQI");
+    const c = await contract(company);
+    const car = await newVehicle(t.db, manager, "CNTRCT");
+    await add(c, car.id);
+    await expect(
+      withActor(t.db, { userId: manager }, async (tx) => {
+        const { number } = await assignNumber(tx, "JOB_ORDER");
+        await tx.insert(jobOrders).values({
+          number,
+          vehicleId: car.id,
+          contragentId: stranger,
+          contractId: c,
+          contractCheck: "ON_CONTRACT",
+          formenId: manager,
+        });
+      }),
+    ).rejects.toBeInstanceOf(ImmutableError);
+  });
+
+  it("the formen must hold the FORMEN (or OWNER) role", async () => {
+    const cashier = await createUser(t.migratorPool, { roles: ["CASHIER"] });
+    await expect(
+      newJob(t.db, cashier, {
+        vehicleId: (await newVehicle(t.db, manager, "CNTRCT")).id,
+        contragentId: await newClient(t.db, manager),
+      }),
+    ).rejects.toBeInstanceOf(WrongRoleError);
+  });
+
+  it("a document on a job takes the job's client, and keeps it on update", async () => {
+    const person = await newClient(t.db, manager);
+    const other = await newClient(t.db, manager);
+    const car = await newVehicle(t.db, manager, "CNTRCT");
+    const otherCar = await newVehicle(t.db, manager, "CNTRCT");
+    const job = await newJob(t.db, manager, { vehicleId: car.id, contragentId: person });
+    const docId = await withActor(t.db, { userId: manager }, (tx) =>
+      createDraft(tx, { type: "QUSUR_AKTI", jobOrderId: job.id }),
+    );
+    const [doc] = await t.db.select().from(documents).where(eq(documents.id, docId));
+    expect(doc).toMatchObject({ vehicleId: car.id, contragentId: person });
+    for (const set of [{ contragentId: other }, { vehicleId: otherCar.id }]) {
+      await expect(
+        withActor(t.db, { userId: manager, reason: "x" }, (tx) =>
+          tx.update(documents).set(set).where(eq(documents.id, docId)),
+        ),
+      ).rejects.toBeInstanceOf(ImmutableError);
+    }
   });
 });

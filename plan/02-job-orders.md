@@ -88,7 +88,7 @@ Foreign keys added: `documents.job_order_id` → job_orders, and `vehicle_plates
 - **`lib/numbering`:** `assignNumber(tx, series)`, where `series` is a `DocType` or `"JOB_ORDER"`; add `JOB_ORDER: "IS"` to the prefixes. The same upsert and the same counter guards are reused.
 - **`lib/contracts`:**
   - `createContract`;
-  - `terminateContract(tx, id, on, reason)`;
+  - `terminateContract(tx, id, reason)`;
   - `addVehicle(tx, contractId, vehicleId, contractPlate?)`;
   - `removeVehicle(tx, contractId, vehicleId, reason)`;
   - `importVehicleList(tx, contractId, rows)`: all or nothing. Rows without a VIN or with an invalid VIN are rejected, and every bad row is listed in one `ContractImportError` (§3a). It finds or creates each vehicle by VIN (C4).
@@ -109,7 +109,7 @@ Foreign keys added: `documents.job_order_id` → job_orders, and `vehicle_plates
     - assigns the IS number in the same transaction and inserts the job.
   - `moveJob(tx, jobId, to, reason)`, plus `cancelJob(tx, jobId, reason)`. After ODENILDI or TEHVIL_VERILDI, `moveJob` also moves to BAGLANDI when the other one has happened (Q1, reason key `audit.jobClosed`). Each step uses `withReason`.
   - `jobHistory(tx, jobId)`: the job's status events.
-- **`messages/az.json`:** new reason keys `audit.jobOpened`, `audit.jobClosed`, `audit.contractVehicleRemoved` and others.
+- **`messages/az.json`:** new reason keys `audit.jobOpened`, `audit.jobClosed` and `audit.contractEnded`. Removing a car takes the user's own reason text.
 
 ## Files
 
@@ -119,7 +119,8 @@ Foreign keys added: `documents.job_order_id` → job_orders, and `vehicle_plates
   - `db/schema/index.ts`;
   - `lib/numbering/{index,prefixes}.ts` with a unit test;
   - `tests/db/catalog.db.test.ts` (new tables; job_status_events joins the append-only allowlist);
-  - `messages/az.json`.
+  - `messages/az.json`;
+  - `tests/db/ac2-immutability.db.test.ts` (seeds the new tables for its every-table checks).
 
 ## Order of work (branch `m2-job-orders`, each step green and committed)
 
@@ -154,6 +155,7 @@ Foreign keys added: `documents.job_order_id` → job_orders, and `vehicle_plates
 | F20 | §3 `contract_vehicles`: one contract per car, `contract_plate` | C2 and C4. |
 | F21 | spec 01 §3.3 "put the job on hold for management" | A recorded decision, not a status (C3). |
 | F22 | §3 `job_orders`: job number format | `IS-YYYY-NNNNNN` from the gapless counter (C5). |
+| F23 | spec 01 §3.2.3 "open job" vs §4 handover before payment | A job handed over on deferred payment releases its car (`car_released`, set by the database on handover). The car can come back before the old job is paid. |
 
 ## Changes during implementation
 
@@ -166,6 +168,16 @@ Foreign keys added: `documents.job_order_id` → job_orders, and `vehicle_plates
 | `openJob` checks that `mechanicId` has an active MECHANIC role | This is a data rule, not a permission, so it doesn't wait for M3. |
 | `importVehicleList` also rejects duplicate VINs and cars active on another contract | These are the same all-or-nothing rule as missing VINs (C2). |
 | `db/schema/columns.ts` gains `sqlList` | Lists of constant values inside larger CHECK expressions. |
+| **Review fixes (verifier and spec-checker):** | |
+| Migration `0015_job_contract_integrity` | A job's client, contract link and contract result are fixed at opening, and the contract link must match the client and the car. A job held for management can't leave QEBUL (except to LEGV) until `resolveHold` releases it, and the decision changes only HOLD_FOR_MANAGEMENT → SEPARATE_PAID. Job numbers, and document numbers on first submission, must have been handed out by the counter this year (`number_from_counter`); a corrected version must reuse its predecessor's number. A document on a job takes the job's client as well as its vehicle. Only ACTIVE contracts take cars. The database sets `added_on`, `removed_on` and `removed_by`. Status events can be written only by the event trigger, not even by the owner by hand. The event trigger fires on any update that changes the status. |
+| Migrations `0014`, `0016` and `0017` (`car_released`) | F23. `0014` first released handed-over jobs by status alone. But ODENILDI after handover then counted as open again and collided with the car's next job (caught by a test), so `0016` and `0017` replaced it with a flag the database sets on handover. |
+| `addVehicle` takes over a car from an ended contract | It removes the car from a terminated, annulled or expired contract with reason `audit.contractEnded`, so a renewal contract can take over its cars. A car on another contract that is valid today is still refused. C2 now reads: one contract per car that is valid today. |
+| `checkContract` ignores ANNULLED contracts, and NOT_ON_CONTRACT needs a contract valid today | A client whose contracts have all ended gets NO_CONTRACT for an unlisted car. A car on an ended contract still gets CONTRACT_EXPIRED. |
+| `importVehicleList` returns `plateConflicts`, and rejects ON_ANOTHER_CONTRACT only for a contract valid today | Section 3a rule 5: the formen's notice when a list plate moves off another car. |
+| `openJob` also checks the formen role (FORMEN or OWNER) | `NotAMechanicError` became `WrongRoleError`. A `contractDecision` given when the check doesn't warn is ignored. |
+| `moveJob`, `cancelJob` and `resolveHold` lock the job row | Moving to the current status, an unknown job, or a concurrent second move is an error, not a silent no-op. `removeVehicle` on a car that isn't on the contract is an error too. |
+| Deferred to milestone 4 (intake) | The change-of-owner question at intake ("Sahibi dəyişib?", section 3a). |
+| Known limitation | `audit_log` rows can still be inserted by the owner role through `log_denied`, which is not a trigger. The app role can't insert them. |
 
 ## Proof
 

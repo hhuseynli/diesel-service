@@ -23,7 +23,7 @@ let approver: string;
 
 beforeAll(async () => {
   t = await createTestDb();
-  creator = await createUser(t.migratorPool, { roles: ["WAREHOUSEMAN"] });
+  creator = await createUser(t.migratorPool, { roles: ["WAREHOUSEMAN", "FORMEN"] });
   approver = await createUser(t.migratorPool, { roles: ["MANAGEMENT"] });
   // At least one row in every table, so row-level delete triggers have something to refuse.
   await withActor(t.db, { userId: creator }, async (tx) => {

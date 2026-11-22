@@ -99,6 +99,34 @@
       "when": 1795369876525,
       "tag": "0013_job_status_events_seq",
       "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1795373361919,
+      "tag": "0014_job_open_index_releases_handed_over",
+      "breakpoints": true
+    },
+    {
+      "idx": 15,
+      "version": "7",
+      "when": 1795373457729,
+      "tag": "0015_job_contract_integrity",
+      "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "7",
+      "when": 1795373609126,
+      "tag": "0016_job_car_released",
+      "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1795373641834,
+      "tag": "0017_job_car_released_guard",
+      "breakpoints": true
     }
   ]
 }

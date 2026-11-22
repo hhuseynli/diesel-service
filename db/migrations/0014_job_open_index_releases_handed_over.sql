@@ -1,0 +1,2 @@
+DROP INDEX "job_orders_one_open_per_vehicle";--> statement-breakpoint
+CREATE UNIQUE INDEX "job_orders_one_open_per_vehicle" ON "job_orders" USING btree ("vehicle_id") WHERE "job_orders"."status" NOT IN ('BAGLANDI', 'LEGV', 'TEHVIL_VERILDI');
