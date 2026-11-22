@@ -198,7 +198,7 @@ Nothing here changes milestone 1. The three conflicts above (landed cost, wareho
 - **`docker/initdb/01-roles.sh`:** creates both roles and the `diesel` database owned by the migrator, with passwords from the environment.
 - **App:** `app/layout.tsx`, `app/page.tsx` (placeholder showing a heading from translations), `i18n/request.ts` (next-intl with a single locale, `az`), `messages/az.json`.
 - **`db/schema/`:** `index.ts`, `people.ts`, `contragents.ts`, `vehicles.ts`, `documents.ts`, `system.ts`.
-- **`db/migrations/`:** `0000`–`0004` plus `meta/`.
+- **`db/migrations/`:** `0000`–`0007` plus `meta/` (0005–0007: see "Changes during implementation").
 - **`scripts/`:**
   - `db-new.ts`: `<name>` runs a schema-diff generate. `<name> --from <file>` runs `generate --custom`, writes the draft into the new file, and refuses if that file is not empty.
   - `check-migrations.sh`: fails if any `db/migrations/*.sql` is modified, renamed or deleted relative to `origin/main`, and runs `drizzle-kit check`.
@@ -263,7 +263,7 @@ Nothing here changes milestone 1. The three conflicts above (landed cost, wareho
   - `audit_log` grants SELECT only;
   - `attachments` grants no UPDATE;
   - every table has the `forbid_delete` and `forbid_truncate` triggers;
-  - every table except the allowlist {audit_log, document_counters} has `audit_row` and `stamp_created`.
+  - every table except `audit_log` has `stamp_created`, and every table except {audit_log, document_counters} has `audit_row`.
 
   A future table that is missing any of these fails the build.
 - Every database test asserts `current_user = 'diesel_app'` on the pool it uses. Owner-only checks go through the separate migrator pool.
@@ -320,6 +320,20 @@ This plan already assumes these changes.
 - **O3:** the cashier's full name and phone, for `pnpm db:seed-user`.
 - **O4 (for spec/02):** landed cost (taxi), several named warehouses and "kontingent", `vitrin nömrəsi`, and sale price at purchase versus `price_rules`. See the walkthrough section.
 
+## Changes during implementation
+
+Recorded as required by CLAUDE.md. None of them changes behaviour the plan promised.
+
+| What | Why |
+| --- | --- |
+| Migration `0005_denial_context` re-creates the raising trigger functions with `TABLE` and the row id in `DETAIL` | Without them, a `DENIED` audit row could not say which table or row the refused write targeted. |
+| Migration `0006_actor_default_null_safe` changes the `created_by` default to `nullif(current_setting('app.user_id', true), '')::uuid` | On a reused connection, the cleared setting is `''`, not NULL. `''::uuid` failed with 22P02 before `stamp_created` could raise the intended DM003. Found by `audit.db.test.ts`. |
+| Migration `0007_forbid_delete_any_table` fixes `forbid_delete` | `0005` read `OLD.id`, which `document_counters` lacks. Deletes there failed with 42703 instead of DM002; still refused, but with the wrong error. Found by `ac2-immutability.db.test.ts`. |
+| `stamp_created` also runs on `document_counters` | The table has `created_*` columns like the others, and assigning a number now also requires an actor. |
+| `.env.example` is created by a human | The protect-paths hook matches `.env.*`, which includes `.env.example`. |
+| New reason key `audit.plateRecorded` | Without it, a car's first plate was audited with the reason "plate replaced". |
+| Known limitation | If a corrected version (v2) is annulled, `supersedes_id` stays taken, so the original can't get another version. To revisit with the approval engine in milestone 3. |
+
 ## Proof
 
 Run in order on a clean checkout with Docker running and `.env` copied from `.env.example`. The verifier runs every item.
@@ -328,7 +342,7 @@ Run in order on a clean checkout with Docker running and `.env` copied from `.en
 | --- | --- | --- |
 | P1 | `pnpm exec node --version` → `v22.*` | Node 22 pin |
 | P2 | `pnpm lint && pnpm typecheck` → exit 0 | lint, types, no JSX string literals in `app/` |
-| P3 | `docker compose up -d db && pnpm db:migrate` → applies 0000–0004 | compose, roles, migrations |
+| P3 | `docker compose up -d db && pnpm db:migrate` → applies 0000–0007 | compose, roles, migrations |
 | P4 | `pnpm db:check` → exit 0 | migrations are append-only and match the schema |
 | P5 | `pnpm test` → `lib/money/money.test.ts`, `lib/numbering/format.test.ts`, `lib/vehicles/vin.test.ts`, `lib/vehicles/plates.test.ts` pass | exact money and rounding; `QA-2026-000123`; "90-JG-526" normalizes to "90JG526"; VIN rules |
 | P6 | `pnpm test:db` → `tests/db/catalog.db.test.ts` | the app role has no DELETE or TRUNCATE anywhere; audit_log SELECT only; attachments no UPDATE; every table has its triggers |
@@ -340,7 +354,7 @@ Run in order on a clean checkout with Docker running and `.env` copied from `.en
 | P12 | `tests/db/ac8-plate-search.db.test.ts` (**acceptance criterion 8**) | Searching A, in any spacing, hyphen or case variant, finds the vehicle labeled FORMER with `usedUntil`. Searching B gives CURRENT. Every result carries its VIN. |
 | P13 | `tests/db/ac9-plate-conflict.db.test.ts` (**acceptance criterion 9**) | Car 1 has plate P. `recordPlate(car2, P)` succeeds. Car 1's row becomes UNCONFIRMED, its other rows are untouched, car 2's row is ACTIVE, and the return value has `conflicts=[car1]`. The two unique indexes hold. Two concurrent `recordPlate` calls for the same plate leave exactly one ACTIVE row. |
 | P14 | `pnpm test:e2e` → `e2e/smoke.spec.ts` | Next.js, next-intl and `messages/az.json` render; Playwright works |
-| P15 | `psql "$DATABASE_URL" -c "DELETE FROM users"` → `permission denied` | the guarantee holds outside the app |
+| P15 | **Run by a human** (the guard-bash hook blocks any command containing `DELETE FROM`, including Claude's and the verifier's): `psql "$DATABASE_URL" -c "DELETE FROM users"` → `permission denied` | the guarantee holds outside the app |
 | P16 | `tests/db/seed-user.db.test.ts`; then, once O3 is known, `pnpm db:seed-user … --role CASHIER` and `psql "$DATABASE_URL" -c "select u.full_name, r.role from users u join user_roles r on r.user_id=u.id where r.role='CASHIER'"` | **Test:** the user and role rows are created with audit rows, the system user is the actor, and a second run makes no change. **Run:** the real cashier exists with the CASHIER role. |
 
 ## Answers to the three review questions

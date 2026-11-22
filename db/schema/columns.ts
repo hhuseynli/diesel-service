@@ -8,8 +8,12 @@ export const id = () => uuid("id").primaryKey().defaultRandom();
 export const createdAt = () =>
   timestamp("created_at", { withTimezone: true }).notNull().defaultNow();
 
-/** The acting user from the transaction setting (set by lib/audit withActor). */
-export const actorDefault = sql`(current_setting('app.user_id', true))::uuid`;
+/**
+ * The acting user from the transaction setting (set by lib/audit withActor). nullif: on a
+ * reused connection the cleared setting is '' rather than NULL, and ''::uuid would fail
+ * before stamp_created can raise its clearer DM003.
+ */
+export const actorDefault = sql`(nullif(current_setting('app.user_id', true), ''))::uuid`;
 
 /** Builds `col IN ('A', 'B')` for CHECK constraints from a TS list of values. */
 export const oneOf = (column: string, values: readonly string[]) =>

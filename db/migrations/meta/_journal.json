@@ -36,6 +36,27 @@
       "when": 1795359679428,
       "tag": "0004_seed",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1795359903912,
+      "tag": "0005_denial_context",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1795360142606,
+      "tag": "0006_actor_default_null_safe",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1795360181622,
+      "tag": "0007_forbid_delete_any_table",
+      "breakpoints": true
     }
   ]
 }

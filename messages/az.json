@@ -6,6 +6,7 @@
   "audit": {
     "plateMovedToOtherVehicle": "Nömrə başqa avtomobildə qeydə alındı",
     "plateReplaced": "Avtomobilin nömrəsi dəyişdi",
+    "plateRecorded": "Avtomobilin nömrəsi qeydə alındı",
     "documentSubmitted": "Sənəd təqdim edildi",
     "documentAnnulled": "Sənəd ləğv edildi",
     "documentPosted": "Sənəd qeydə alındı"
