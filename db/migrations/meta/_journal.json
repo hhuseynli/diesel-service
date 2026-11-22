@@ -176,6 +176,20 @@
       "when": 1795376943219,
       "tag": "0024_auth_approval_hardening",
       "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1795377232991,
+      "tag": "0025_intake_tables",
+      "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1795377276121,
+      "tag": "0026_intake_guards",
+      "breakpoints": true
     }
   ]
 }

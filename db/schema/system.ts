@@ -82,10 +82,18 @@ export const attachments = pgTable(
     sizeBytes: bigint("size_bytes", { mode: "number" }).notNull(),
     linkedTable: text("linked_table"),
     linkedId: uuid("linked_id"),
+    // Camera evidence (plan 04, B2): the photo's own capture time against server time.
+    // CAMERA_OK within 10 minutes; CAPTURE_TIME_OFF otherwise; NO_CAPTURE_TIME if absent.
+    captureTime: text("capture_time"),
+    captureCheck: text("capture_check"),
     createdAt: createdAt(),
     createdBy: createdBy(),
   },
   (t) => [
+    check(
+      "attachments_capture_check",
+      sql`${t.captureCheck} IN ('CAMERA_OK', 'CAPTURE_TIME_OFF', 'NO_CAPTURE_TIME')`,
+    ),
     check("attachments_sha256", sql`${t.sha256} ~ '^[0-9a-f]{64}$'`),
     check("attachments_size", sql`${t.sizeBytes} > 0`),
     check("attachments_link_pair", sql`(${t.linkedTable} IS NULL) = (${t.linkedId} IS NULL)`),

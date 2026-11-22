@@ -25,7 +25,15 @@ import { assignNumber } from "@/lib/numbering";
 import { recordPlate } from "@/lib/vehicles";
 import { createUser } from "./fixtures";
 import { asActor, createTestDb, sqlstateOf, type TestDb } from "./helpers";
-import { newClient, newJob, newVehicle, PATH_TO, walk } from "./jobs-fixtures";
+import {
+  newClient,
+  newJob,
+  newVehicle,
+  PATH_TO,
+  signedHandoverAct,
+  step,
+  walk,
+} from "./jobs-fixtures";
 
 let t: TestDb;
 let formen: string;
@@ -79,16 +87,8 @@ describe("happy paths close automatically", () => {
     ["handed over first (deferred payment)", "TEHVIL_VERILDI", "ODENILDI"],
   ] as const)("%s", async (_, first, second) => {
     const job = await jobAt("HAZIR");
-    expect(
-      await withActor(t.db, { userId: actorFor(first) }, (tx) =>
-        moveJob(tx, job.id, first, "test"),
-      ),
-    ).toBe(first);
-    expect(
-      await withActor(t.db, { userId: actorFor(second) }, (tx) =>
-        moveJob(tx, job.id, second, "test"),
-      ),
-    ).toBe("BAGLANDI");
+    expect(await step(t.db, actorFor(first), job.id, first)).toBe(first);
+    expect(await step(t.db, actorFor(second), job.id, second)).toBe("BAGLANDI");
     expect(await statusOf(job.id)).toBe("BAGLANDI");
 
     const history = await jobHistory(t.db, job.id);
@@ -107,7 +107,7 @@ describe("happy paths close automatically", () => {
     expect(history.at(-3)).toMatchObject({
       toStatus: first,
       userId: actorFor(first),
-      reason: "test",
+      reason: first === "TEHVIL_VERILDI" ? "audit.handedOver" : "test",
     });
     expect(history.at(-1)).toMatchObject({
       fromStatus: second,
@@ -345,6 +345,7 @@ describe("integrity", () => {
 
   it("payment and handover each happen once, whatever the app does", async () => {
     const job = await jobAt("HAZIR");
+    await signedHandoverAct(t.db, formen, job.id);
     const set = (status: JobStatus) =>
       withActor(t.db, { userId: formen, reason: "direct" }, (tx) =>
         tx.update(jobOrders).set({ status }).where(eq(jobOrders.id, job.id)),

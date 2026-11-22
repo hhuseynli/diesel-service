@@ -2,8 +2,15 @@
 // any record, fails at the database level, and the attempt is logged.
 import { eq, sql } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { attachments, contragents, documentLines, documents } from "@/db/schema";
-import { withActor } from "@/lib/audit";
+import {
+  attachments,
+  contragents,
+  documentLines,
+  documents,
+  partsRequests,
+  vinDecodes,
+} from "@/db/schema";
+import { withActor, withReason } from "@/lib/audit";
 import {
   DocumentLockedError,
   InvalidTransitionError,
@@ -12,10 +19,12 @@ import {
 import { addVehicle, createContract } from "@/lib/contracts";
 import { registerTablet, setPin, signInWithPin } from "@/lib/auth";
 import { annulDocument, createNewVersion, submitDocument } from "@/lib/documents";
+import { addFinding, addPartsRequest, addPlannedService, recordRemovedPart } from "@/lib/intake";
 import { openJob } from "@/lib/jobs";
 import { createVehicle } from "@/lib/vehicles";
 import { approveForTest, createUser } from "./fixtures";
 import { draft, submitted, TWO_LINES } from "./documents-fixtures";
+import { fakeAttachment, newClient, newJob, newVehicle, PATH_TO, walk } from "./jobs-fixtures";
 import { asActor, createTestDb, sqlstateOf, SYSTEM_USER_ID, type TestDb } from "./helpers";
 
 let t: TestDb;
@@ -61,6 +70,35 @@ beforeAll(async () => {
   );
   const pin = await signInWithPin(t.db, { deviceToken, userId: formen, pin: "4821" });
   if (pin.status !== "OK") throw new Error(`PIN sign-in failed: ${pin.status}`);
+  // Intake tables (plan 04): a job taken through inspection, work, quality check and handover.
+  const mechanic = await createUser(t.migratorPool, { roles: ["MECHANIC"] });
+  const car = await newVehicle(t.db, creator, "WDBAC2");
+  const job = await newJob(t.db, creator, {
+    vehicleId: car.id,
+    contragentId: await newClient(t.db, creator),
+  });
+  await withActor(t.db, { userId: creator }, async (tx) => {
+    await addFinding(tx, job.id, {
+      mechanicId: mechanic,
+      description: "Əyləc diskləri yeyilib",
+      attachmentIds: [await fakeAttachment(tx)],
+    });
+    await addPlannedService(tx, job.id, { description: "Əyləc disklərinin dəyişdirilməsi" });
+    const part = await addPartsRequest(tx, job.id, { description: "Əyləc diski", quantity: "2" });
+    await withReason(tx, "lazım deyil", () =>
+      tx.update(partsRequests).set({ status: "CANCELLED" }).where(eq(partsRequests.id, part)),
+    );
+    await tx.insert(vinDecodes).values({ vin: car.vin, provider: "TEST", rawResponse: {} });
+  });
+  await walk(t.db, creator, job.id, PATH_TO.TEMIRDE);
+  await withActor(t.db, { userId: creator }, async (tx) =>
+    recordRemovedPart(tx, job.id, {
+      description: "Köhnə əyləc diski",
+      photoId: await fakeAttachment(tx),
+      disposition: "RETURNED_TO_CLIENT",
+    }),
+  );
+  await walk(t.db, creator, job.id, ["HAZIR", "TEHVIL_VERILDI"]);
 });
 afterAll(() => t.close());
 

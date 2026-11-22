@@ -43,6 +43,8 @@ export interface OpenJobInput {
   mechanicId?: string;
   complaints?: string;
   contractDecision?: ContractDecision;
+  /** "Sahibi dəyişib?" when the client differs from the vehicle's last job (plan 04, B7). */
+  ownerChanged?: boolean;
 }
 
 /**
@@ -92,6 +94,7 @@ export async function openJob(
         formenId: input.formenId,
         mechanicId: input.mechanicId,
         complaints: input.complaints,
+        ownerChanged: input.ownerChanged,
       })
       .returning({ id: jobOrders.id }),
   );
