@@ -1,5 +1,9 @@
 import { randomInt } from "node:crypto";
+import { drizzle } from "drizzle-orm/node-postgres";
 import type { Pool } from "pg";
+import * as schema from "@/db/schema";
+import { approveStep, rejectStep } from "@/lib/approvals";
+import { withActor } from "@/lib/audit";
 import type { Role } from "@/lib/users/roles";
 import { asActor, SYSTEM_USER_ID } from "./helpers";
 
@@ -22,23 +26,26 @@ export async function createUser(
   });
 }
 
-/** Returns a submitted document to its creator (the approval engine's job in milestone 3). */
+async function pendingSteps(appPool: Pool, documentId: string): Promise<string[]> {
+  const { rows } = await appPool.query<{ id: string }>(
+    `SELECT id FROM approvals WHERE document_id = $1 AND status = 'PENDING' ORDER BY round, step_no`,
+    [documentId],
+  );
+  return rows.map((r) => r.id);
+}
+
+/** Rejects a submitted document's next step through the approval engine. */
 export async function rejectForTest(appPool: Pool, userId: string, documentId: string) {
-  await asActor(appPool, { userId, reason: "test rejection" }, (c) =>
-    c.query("UPDATE documents SET status = 'REJECTED' WHERE id = $1 AND status = 'SUBMITTED'", [
-      documentId,
-    ]),
+  const [step] = await pendingSteps(appPool, documentId);
+  if (!step) throw new Error("No pending approval step to reject");
+  await withActor(drizzle(appPool, { schema }), { userId }, (tx) =>
+    rejectStep(tx, step, "test rejection"),
   );
 }
 
-/**
- * Approves a submitted document directly. The approval engine (creator cannot approve,
- * approval steps) arrives in milestone 3; until then tests use this fixture.
- */
+/** Approves every pending step of a submitted document through the approval engine. */
 export async function approveForTest(appPool: Pool, userId: string, documentId: string) {
-  await asActor(appPool, { userId, reason: "test approval" }, (c) =>
-    c.query("UPDATE documents SET status = 'APPROVED' WHERE id = $1 AND status = 'SUBMITTED'", [
-      documentId,
-    ]),
-  );
+  for (const step of await pendingSteps(appPool, documentId)) {
+    await withActor(drizzle(appPool, { schema }), { userId }, (tx) => approveStep(tx, step));
+  }
 }

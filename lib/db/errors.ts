@@ -46,6 +46,8 @@ export class ReasonRequiredError extends DbGuardError {}
 export class ImmutableError extends DbGuardError {}
 /** DM006: a status change the lifecycle does not allow. */
 export class InvalidTransitionError extends DbGuardError {}
+/** DM007: the actor may not decide this approval step (own document, or wrong role). */
+export class ApprovalNotAllowedError extends DbGuardError {}
 /** 42501: the app role lacks the privilege (DELETE, TRUNCATE, writing audit_log...). */
 export class PermissionDeniedError extends DbGuardError {}
 
@@ -56,6 +58,7 @@ const BY_SQLSTATE: Record<string, typeof DbGuardError> = {
   DM004: ReasonRequiredError,
   DM005: ImmutableError,
   DM006: InvalidTransitionError,
+  DM007: ApprovalNotAllowedError,
   "42501": PermissionDeniedError,
 };
 

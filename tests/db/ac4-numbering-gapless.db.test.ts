@@ -5,7 +5,7 @@ import { withActor } from "@/lib/audit";
 import { annulDocument, createNewVersion, submitDocument } from "@/lib/documents";
 import type { DocType } from "@/lib/documents/types";
 import { approveForTest, createUser } from "./fixtures";
-import { draft, sequenceOf } from "./documents-fixtures";
+import { draft, sequenceOf, SUBMIT_OPTS } from "./documents-fixtures";
 import { createTestDb, type TestDb } from "./helpers";
 
 let t: TestDb;
@@ -15,7 +15,7 @@ let approver: string;
 beforeAll(async () => {
   t = await createTestDb();
   creator = await createUser(t.migratorPool, { roles: ["WAREHOUSEMAN"] });
-  approver = await createUser(t.migratorPool, { roles: ["MANAGEMENT"] });
+  approver = await createUser(t.migratorPool, { roles: ["OWNER"] });
 });
 afterAll(() => t.close());
 
@@ -35,7 +35,7 @@ describe("gapless numbering in any order", () => {
     const random = prng(seed);
     const pick = <T>(list: T[]): T | undefined =>
       list.length ? list.splice(Math.floor(random() * list.length), 1)[0] : undefined;
-    const types: DocType[] = ["QUSUR_AKTI", "SATIS"];
+    const types: DocType[] = ["MEDAXIL", "SATIS"];
     const drafts: { id: string; type: DocType }[] = [];
     const submittedDocs: string[] = [];
     const approvedDocs: string[] = [];
@@ -47,7 +47,7 @@ describe("gapless numbering in any order", () => {
         drafts.push({ id: await draft(t.db, creator, type), type });
       } else if (r < 0.55) {
         const d = pick(drafts)!;
-        await withActor(t.db, { userId: creator }, (tx) => submitDocument(tx, d.id));
+        await withActor(t.db, { userId: creator }, (tx) => submitDocument(tx, d.id, SUBMIT_OPTS));
         submittedDocs.push(d.id);
       } else if (r < 0.65) {
         const d = pick(drafts)!;
@@ -66,7 +66,7 @@ describe("gapless numbering in any order", () => {
         const d = drafts[Math.floor(random() * drafts.length)]!;
         await expect(
           withActor(t.db, { userId: creator }, async (tx) => {
-            await submitDocument(tx, d.id);
+            await submitDocument(tx, d.id, SUBMIT_OPTS);
             throw new Rollback();
           }),
         ).rejects.toBeInstanceOf(Rollback);
@@ -75,7 +75,7 @@ describe("gapless numbering in any order", () => {
         const id = approvedDocs[Math.floor(random() * approvedDocs.length)];
         if (id) {
           const v = await withActor(t.db, { userId: creator }, (tx) => createNewVersion(tx, id));
-          await withActor(t.db, { userId: creator }, (tx) => submitDocument(tx, v));
+          await withActor(t.db, { userId: creator }, (tx) => submitDocument(tx, v, SUBMIT_OPTS));
           approvedDocs.splice(approvedDocs.indexOf(id), 1);
         }
       }

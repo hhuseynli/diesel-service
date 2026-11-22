@@ -21,7 +21,7 @@ let today: string;
 
 beforeAll(async () => {
   t = await createTestDb();
-  formen = await createUser(t.migratorPool, { roles: ["FORMEN"] });
+  formen = await createUser(t.migratorPool, { roles: ["FORMEN", "WAREHOUSEMAN"] });
   const { rows } = await t.db.execute<{ d: string }>(sql`SELECT baku_date()::text AS d`);
   today = rows[0]!.d;
 });

@@ -2,6 +2,7 @@ import { sql } from "drizzle-orm";
 import { vehicles } from "@/db/schema";
 import { withReason } from "@/lib/audit";
 import { pgErrorOf } from "@/lib/db/errors";
+import { requirePermission } from "@/lib/permissions";
 import type { Db, Tx } from "@/lib/db/types";
 import { normalizePlate } from "./plates";
 import { isValidVin, normalizeVin } from "./vin";
@@ -39,6 +40,7 @@ export async function createVehicle(
     plate?: { display: string; source: PlateSource; jobOrderId?: string };
   },
 ): Promise<{ id: string; conflicts: PlateConflict[] }> {
+  await requirePermission(tx, "RECORD_VEHICLE");
   const vin = normalizeVin(input.vin);
   if (!isValidVin(vin)) throw new RangeError(`Invalid VIN "${input.vin}"`);
   const [vehicle] = await tx
@@ -76,6 +78,7 @@ export async function recordPlate(
   tx: Tx,
   input: { vehicleId: string; plateDisplay: string; source: PlateSource; jobOrderId?: string },
 ): Promise<RecordPlateResult> {
+  await requirePermission(tx, "RECORD_VEHICLE");
   const display = input.plateDisplay.trim();
   if (normalizePlate(display) === "") throw new RangeError("A plate needs at least one character");
 

@@ -7,7 +7,7 @@ import { submitDocument } from "@/lib/documents";
 import { assignNumber } from "@/lib/numbering";
 import { PREFIXES } from "@/lib/numbering/prefixes";
 import { approveForTest, createUser } from "./fixtures";
-import { draft, sequenceOf } from "./documents-fixtures";
+import { draft, sequenceOf, SUBMIT_OPTS } from "./documents-fixtures";
 import { ImmutableError } from "@/lib/db/errors";
 import { asActor, createTestDb, sqlstateOf, SYSTEM_USER_ID, type TestDb } from "./helpers";
 
@@ -18,7 +18,7 @@ let approver: string;
 beforeAll(async () => {
   t = await createTestDb();
   userId = await createUser(t.migratorPool, { roles: ["WAREHOUSEMAN"] });
-  approver = await createUser(t.migratorPool, { roles: ["MANAGEMENT"] });
+  approver = await createUser(t.migratorPool, { roles: ["OWNER"] });
 });
 afterAll(() => t.close());
 
@@ -30,7 +30,7 @@ describe("assignNumber", () => {
     for (let i = 0; i < 50; i++) ids.push(await draft(t.db, userId, "SATIS"));
 
     const numbers = await Promise.all(
-      ids.map((id) => withActor(t.db, { userId }, (tx) => submitDocument(tx, id))),
+      ids.map((id) => withActor(t.db, { userId }, (tx) => submitDocument(tx, id, SUBMIT_OPTS))),
     );
 
     expect(new Set(numbers).size).toBe(50);
@@ -147,9 +147,9 @@ describe("numbers must come from the counter (second verifier pass)", () => {
 
   it("a corrected version needs an approved predecessor of the same type, with the next version", async () => {
     const submittedOnly = await draft(t.db, userId, "SATIS");
-    await withActor(t.db, { userId }, (tx) => submitDocument(tx, submittedOnly));
+    await withActor(t.db, { userId }, (tx) => submitDocument(tx, submittedOnly, SUBMIT_OPTS));
     const approved = await draft(t.db, userId, "SATIS");
-    await withActor(t.db, { userId }, (tx) => submitDocument(tx, approved));
+    await withActor(t.db, { userId }, (tx) => submitDocument(tx, approved, SUBMIT_OPTS));
     await approveForTest(t.appPool, approver, approved);
 
     for (const [supersedesId, type, version] of [

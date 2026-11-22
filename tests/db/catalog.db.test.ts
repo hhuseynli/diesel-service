@@ -5,7 +5,9 @@ import { createTestDb, type TestDb } from "./helpers";
 
 let t: TestDb;
 let tables: string[];
-const APPEND_ONLY = ["audit_log", "job_status_events"];
+const APPEND_ONLY = ["audit_log", "job_status_events", "login_attempts"];
+// Sign-in bookkeeping: stamped but not audited, last_seen_at changes on every request (plan 03, A9).
+const OPERATIONAL = ["sessions"];
 
 beforeAll(async () => {
   t = await createTestDb();
@@ -43,6 +45,7 @@ describe("catalog", () => {
 
   it("has the core, job order and contract tables", () => {
     expect(tables).toEqual([
+      "approvals",
       "attachments",
       "audit_log",
       "contract_vehicles",
@@ -53,7 +56,10 @@ describe("catalog", () => {
       "documents",
       "job_orders",
       "job_status_events",
+      "login_attempts",
+      "sessions",
       "settings",
+      "tablet_devices",
       "user_roles",
       "users",
       "vehicle_plates",
@@ -76,6 +82,8 @@ describe("catalog", () => {
     }
     expect(await appHas("attachments", "UPDATE")).toBe(false);
     expect(await appHas("settings", "UPDATE")).toBe(false);
+    expect(await appHas("login_attempts", "UPDATE")).toBe(false);
+    expect(await appHas("approvals", "UPDATE")).toBe(true);
     const { rows } = await t.migratorPool.query(
       `SELECT table_name, column_name FROM information_schema.column_privileges
         WHERE grantee = 'diesel_app' AND privilege_type = 'UPDATE'
@@ -106,7 +114,7 @@ describe("catalog", () => {
       const triggers = await triggersOf(table);
       // Append-only logs have `at` instead of created_*; counters are not audited.
       if (!APPEND_ONLY.includes(table)) expect(triggers, table).toContain("stamp_created");
-      if (![...APPEND_ONLY, "document_counters"].includes(table)) {
+      if (![...APPEND_ONLY, ...OPERATIONAL, "document_counters"].includes(table)) {
         expect(triggers, table).toContain("audit_row");
       }
     }

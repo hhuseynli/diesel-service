@@ -5,6 +5,7 @@ import { pgErrorOf } from "@/lib/db/errors";
 import type { Db, Tx } from "@/lib/db/types";
 import type { ContractCheck } from "@/lib/jobs/types";
 import { Money, Rate } from "@/lib/money";
+import { requirePermission } from "@/lib/permissions";
 import { createVehicle, isValidVin, normalizeVin, type PlateConflict } from "@/lib/vehicles";
 
 // Contracts with corporate clients and the vehicles they cover (spec 00, sections 3
@@ -51,6 +52,7 @@ export class ContractImportError extends Error {
 }
 
 export async function createContract(tx: Tx, input: ContractInput): Promise<string> {
+  await requirePermission(tx, "MANAGE_CONTRACTS");
   if (
     input.penaltyRateDaily !== undefined &&
     !/^\d{1,3}(\.\d{1,4})?$/.test(input.penaltyRateDaily)
@@ -82,6 +84,7 @@ export async function createContract(tx: Tx, input: ContractInput): Promise<stri
 
 /** Ends a contract. Its vehicles then check as CONTRACT_EXPIRED; the row is frozen. */
 export async function terminateContract(tx: Tx, contractId: string, reason: string) {
+  await requirePermission(tx, "MANAGE_CONTRACTS");
   if (reason.trim() === "") throw new Error("Terminating a contract needs a reason");
   await withReason(tx, reason, () =>
     tx
@@ -113,6 +116,7 @@ export async function addVehicle(
   vehicleId: string,
   contractPlate?: string,
 ): Promise<string> {
+  await requirePermission(tx, "MANAGE_CONTRACTS");
   const current = await currentContractOf(tx, vehicleId);
   if (current?.contract_id === contractId) {
     throw new VehicleOnAnotherContractError("The vehicle is already on this contract");
@@ -145,6 +149,7 @@ export async function addVehicle(
  */
 export async function removeVehicle(tx: Tx, contractId: string, vehicleId: string, reason: string) {
   if (reason.trim() === "") throw new Error("Removing a vehicle from a contract needs a reason");
+  await requirePermission(tx, "MANAGE_CONTRACTS");
   const removed = await withReason(tx, reason, () =>
     tx
       .update(contractVehicles)
@@ -179,6 +184,7 @@ export async function importVehicleList(
   createdVehicles: number;
   plateConflicts: PlateConflict[];
 }> {
+  await requirePermission(tx, "MANAGE_CONTRACTS");
   const problems: ImportProblem[] = [];
   const seen = new Set<string>();
   const vins: string[] = [];
