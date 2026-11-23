@@ -30,72 +30,74 @@ export default async function RemovedPartPage({
   return (
     <>
       <TabletBar back={{ href: `/is/${job.id}`, label: job.number }} title={t("removedTitle")} />
-      <form action={removedPartAction} className="main" style={{ ["--side" as string]: "440px" }}>
-        <input type="hidden" name="jobId" value={job.id} />
-        <section className="panel scroll">
-          <ErrorNote code={query.e} />
-          <span className="h-panel">{t("which")}</span>
-          <div className="chips">
-            {parts.map((p, i) => (
-              <label key={p} className="chip">
-                <input type="radio" name="part" value={p} defaultChecked={i === 0} required />
+      <main className="frame">
+        <form action={removedPartAction} className="main" style={{ ["--side" as string]: "440px" }}>
+          <input type="hidden" name="jobId" value={job.id} />
+          <section className="panel scroll">
+            <ErrorNote code={query.e} />
+            <span className="h-panel">{t("which")}</span>
+            <div className="chips">
+              {parts.map((p, i) => (
+                <label key={p} className="chip">
+                  <input type="radio" name="part" value={p} defaultChecked={i === 0} required />
+                  <Icon name="check" size={16} stroke={2.4} />
+                  {p}
+                </label>
+              ))}
+              <label className="chip">
+                <input
+                  type="radio"
+                  name="part"
+                  value="other"
+                  defaultChecked={parts.length === 0}
+                  required
+                />
                 <Icon name="check" size={16} stroke={2.4} />
-                {p}
+                {t("otherPart")}
+              </label>
+            </div>
+            <input
+              className="input"
+              name="otherPart"
+              aria-label={t("otherPartName")}
+              placeholder={t("otherPartName")}
+            />
+            <span className="h-panel">{t("info.mechanic")}</span>
+            <MechanicChips staff={staff} selected={job.mechanicId} />
+            <span className="h-panel">{t("removedPhoto")}</span>
+            <div className="tiles row">
+              <PhotoTile
+                name="photo"
+                label={t("removedPhoto")}
+                hint={tu("tapToShoot")}
+                required
+                width={280}
+                height={190}
+              />
+            </div>
+          </section>
+          <section className="panel">
+            <span className="h-panel">{t("fate")}</span>
+            {DISPOSITIONS.map((d, i) => (
+              <label key={d} className="option">
+                <input type="radio" name="disposition" value={d} defaultChecked={i === 0} />
+                <span className="option-dot" aria-hidden="true">
+                  <Icon name="check" size={16} stroke={2.4} />
+                </span>
+                <span className="option-text">
+                  <strong>{t(`disp.${d}`)}</strong>
+                  <small>{t(`dispHint.${d}`)}</small>
+                </span>
               </label>
             ))}
-            <label className="chip">
-              <input
-                type="radio"
-                name="part"
-                value="other"
-                defaultChecked={parts.length === 0}
-                required
-              />
-              <Icon name="check" size={16} stroke={2.4} />
-              {t("otherPart")}
-            </label>
-          </div>
-          <input
-            className="input"
-            name="otherPart"
-            aria-label={t("otherPartName")}
-            placeholder={t("otherPartName")}
-          />
-          <span className="h-panel">{t("info.mechanic")}</span>
-          <MechanicChips staff={staff} selected={job.mechanicId} />
-          <span className="h-panel">{t("removedPhoto")}</span>
-          <div className="tiles row">
-            <PhotoTile
-              name="photo"
-              label={t("removedPhoto")}
-              hint={tu("tapToShoot")}
-              required
-              width={280}
-              height={190}
-            />
-          </div>
-        </section>
-        <section className="panel">
-          <span className="h-panel">{t("fate")}</span>
-          {DISPOSITIONS.map((d, i) => (
-            <label key={d} className="option">
-              <input type="radio" name="disposition" value={d} defaultChecked={i === 0} />
-              <span className="option-dot" aria-hidden="true">
-                <Icon name="check" size={16} stroke={2.4} />
-              </span>
-              <span className="option-text">
-                <strong>{t(`disp.${d}`)}</strong>
-                <small>{t(`dispHint.${d}`)}</small>
-              </span>
-            </label>
-          ))}
-          <span className="spacer" />
-          <button type="submit" className="btn primary lg block">
-            <Icon name="check" stroke={2.4} />
-            {tu("save")}
-          </button>
-        </section>
-      </form>
+            <span className="spacer" />
+            <button type="submit" className="btn primary lg block">
+              <Icon name="check" stroke={2.4} />
+              {tu("save")}
+            </button>
+          </section>
+        </form>
+      </main>
     </>
   );
 }

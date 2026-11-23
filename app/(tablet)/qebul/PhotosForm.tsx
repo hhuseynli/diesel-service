@@ -51,99 +51,103 @@ export function PhotosForm({
           : null;
 
   return (
-    <form action={uploadIntakePhotos} className="main" style={{ ["--side" as string]: "400px" }}>
-      <input type="hidden" name="back" value={back} />
-      <section className="panel" style={{ padding: "20px 24px" }}>
-        <span className="panel-head">
-          <h1 className="h-card">{t("photosTitle")}</h1>
-          <span className="muted num">
-            {t("photosCount", { n: SLOTS.length - missing.length })}
+    <main className="frame">
+      <form action={uploadIntakePhotos} className="main" style={{ ["--side" as string]: "400px" }}>
+        <input type="hidden" name="back" value={back} />
+        <section className="panel" style={{ padding: "20px 24px" }}>
+          <span className="panel-head">
+            <h1 className="h-card">{t("photosTitle")}</h1>
+            <span className="muted num">
+              {t("photosCount", { n: SLOTS.length - missing.length })}
+            </span>
           </span>
-        </span>
-        <div className="tiles">
-          {SLOTS.map((slot) => (
-            <PhotoTile
-              key={slot}
-              name={`photo_${slot}`}
-              label={t(`slot.${slot}`)}
-              hint={tu("tapToShoot")}
-              required
-              onPick={(n) => setTaken((s) => ({ ...s, [slot]: n > 0 }))}
-            />
-          ))}
-        </div>
-        <span className="small muted">{t("photosNote")}</span>
-      </section>
+          <div className="tiles">
+            {SLOTS.map((slot) => (
+              <PhotoTile
+                key={slot}
+                name={`photo_${slot}`}
+                label={t(`slot.${slot}`)}
+                hint={tu("tapToShoot")}
+                required
+                onPick={(n) => setTaken((s) => ({ ...s, [slot]: n > 0 }))}
+              />
+            ))}
+          </div>
+          <span className="small muted">{t("photosNote")}</span>
+        </section>
 
-      <section className="panel">
-        <label htmlFor="km" className="h-panel">
-          {t("kmLabel")}
-        </label>
-        <span className="suffix">
-          <input
-            id="km"
-            name="km"
-            className={`input big${low ? " invalid" : high ? " warn" : ""}`}
-            inputMode="numeric"
-            autoComplete="off"
-            required
-            value={km}
-            onChange={(e) => setKm(e.currentTarget.value.replace(/[^\d\s]/g, ""))}
-          />
-          <span aria-hidden="true">{tu("kmUnit")}</span>
-        </span>
-        <span className="muted num">
-          {previous ? t("previous", { km: group(previous.km), date: previous.date }) : t("kmFirst")}
-        </span>
-        {previous && value !== null && !low && !high && (
-          <span className="ok-line num">
-            <Icon name="ok" size={18} />
-            {t("kmOk", { days, delta: group(delta), perDay: group(perDay) })}
+        <section className="panel">
+          <label htmlFor="km" className="h-panel">
+            {t("kmLabel")}
+          </label>
+          <span className="suffix">
+            <input
+              id="km"
+              name="km"
+              className={`input big${low ? " invalid" : high ? " warn" : ""}`}
+              inputMode="numeric"
+              autoComplete="off"
+              required
+              value={km}
+              onChange={(e) => setKm(e.currentTarget.value.replace(/[^\d\s]/g, ""))}
+            />
+            <span aria-hidden="true">{tu("kmUnit")}</span>
           </span>
-        )}
-        {low && (
-          <>
-            <div className="notice error" role="alert">
-              <Icon name="error" size={22} />
+          <span className="muted num">
+            {previous
+              ? t("previous", { km: group(previous.km), date: previous.date })
+              : t("kmFirst")}
+          </span>
+          {previous && value !== null && !low && !high && (
+            <span className="ok-line num">
+              <Icon name="ok" size={18} />
+              {t("kmOk", { days, delta: group(delta), perDay: group(perDay) })}
+            </span>
+          )}
+          {low && (
+            <>
+              <div className="notice error" role="alert">
+                <Icon name="error" size={22} />
+                <div className="notice-body">
+                  <strong>{t("kmLowTitle")}</strong>
+                  <span>{t("kmLowBody", { delta: group(-delta) })}</span>
+                </div>
+              </div>
+            </>
+          )}
+          {high && (
+            <div className="notice warn">
+              <Icon name="warn" size={22} />
               <div className="notice-body">
-                <strong>{t("kmLowTitle")}</strong>
-                <span>{t("kmLowBody", { delta: group(-delta) })}</span>
+                <strong>{t("kmHighTitle", { perDay: group(perDay) })}</strong>
+                <span>{t("kmHighBody")}</span>
               </div>
             </div>
-          </>
-        )}
-        {high && (
-          <div className="notice warn">
-            <Icon name="warn" size={22} />
-            <div className="notice-body">
-              <strong>{t("kmHighTitle", { perDay: group(perDay) })}</strong>
-              <span>{t("kmHighBody")}</span>
-            </div>
+          )}
+          <div className="field" hidden={!low}>
+            <label htmlFor="reason">{t("reasonRequired")}</label>
+            <textarea
+              id="reason"
+              name="reason"
+              rows={2}
+              className={`textarea${low ? " invalid" : ""}`}
+              placeholder={t("reasonPlaceholder")}
+              value={reason}
+              onChange={(e) => setReason(e.currentTarget.value)}
+            />
           </div>
-        )}
-        <div className="field" hidden={!low}>
-          <label htmlFor="reason">{t("reasonRequired")}</label>
-          <textarea
-            id="reason"
-            name="reason"
-            rows={2}
-            className={`textarea${low ? " invalid" : ""}`}
-            placeholder={t("reasonPlaceholder")}
-            value={reason}
-            onChange={(e) => setReason(e.currentTarget.value)}
-          />
-        </div>
-        <span className="spacer" />
-        <button
-          type="submit"
-          className={why ? "btn lg block" : "btn primary lg block"}
-          disabled={Boolean(why)}
-        >
-          {tu("continue")}
-          <Icon name="arrow" />
-        </button>
-        {why && <span className="small muted center">{why}</span>}
-      </section>
-    </form>
+          <span className="spacer" />
+          <button
+            type="submit"
+            className={why ? "btn lg block" : "btn primary lg block"}
+            disabled={Boolean(why)}
+          >
+            {tu("continue")}
+            <Icon name="arrow" />
+          </button>
+          {why && <span className="small muted center">{why}</span>}
+        </section>
+      </form>
+    </main>
   );
 }

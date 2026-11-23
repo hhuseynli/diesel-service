@@ -29,37 +29,39 @@ export default async function ReprintPage({
   return (
     <>
       <TabletBar back={{ href: backHref, label: tu("back") }} title={t("reprintTitle")} />
-      <form action={reprintStickerAction} className="main">
-        <input type="hidden" name="vehicleId" value={vehicle.id} />
-        <input type="hidden" name="back" value={backHref} />
-        <section className="sticker-stage">
-          <span className="h-card">
-            {[vehicle.make, vehicle.model].filter(Boolean).join(" ") || vehicle.vin}
-          </span>
-          <Plate plate={vehicle.plate} vin={vehicle.vin} size="lg" />
-        </section>
-        <section className="panel">
-          <ErrorNote code={e} />
-          <Notice kind="warn" title={t("reprintWarnTitle")}>
-            {t("reprintWarnBody")}
-          </Notice>
-          <div className="field">
-            <label htmlFor="reason">{t("reason")}</label>
-            <input
-              id="reason"
-              className="input"
-              name="reason"
-              required
-              placeholder={t("reasonPlaceholder")}
-            />
-          </div>
-          <span className="spacer" />
-          <button type="submit" className="btn primary lg block">
-            <Icon name="printer" />
-            {t("reprintSubmit")}
-          </button>
-        </section>
-      </form>
+      <main className="frame">
+        <form action={reprintStickerAction} className="main">
+          <input type="hidden" name="vehicleId" value={vehicle.id} />
+          <input type="hidden" name="back" value={backHref} />
+          <section className="sticker-stage">
+            <span className="h-card">
+              {[vehicle.make, vehicle.model].filter(Boolean).join(" ") || vehicle.vin}
+            </span>
+            <Plate plate={vehicle.plate} vin={vehicle.vin} size="lg" />
+          </section>
+          <section className="panel">
+            <ErrorNote code={e} />
+            <Notice kind="warn" title={t("reprintWarnTitle")}>
+              {t("reprintWarnBody")}
+            </Notice>
+            <div className="field">
+              <label htmlFor="reason">{t("reason")}</label>
+              <input
+                id="reason"
+                className="input"
+                name="reason"
+                required
+                placeholder={t("reasonPlaceholder")}
+              />
+            </div>
+            <span className="spacer" />
+            <button type="submit" className="btn primary lg block">
+              <Icon name="printer" />
+              {t("reprintSubmit")}
+            </button>
+          </section>
+        </form>
+      </main>
     </>
   );
 }

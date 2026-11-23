@@ -2237,3 +2237,11 @@ a.result:hover {
   flex-wrap: wrap;
   gap: 8px;
 }
+
+/* A form that is the screen's two-column grid sits inside the page's main landmark. */
+.frame {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}

@@ -28,56 +28,58 @@ export async function ComplaintsStep({ params }: { params: Params }) {
         title={t("title")}
       />
       <StepBar step={4} />
-      <form action={saveIntake} className="main even">
-        <input type="hidden" name="back" value={href(params)} />
-        <section className="panel">
-          <ErrorNote code={params.e} />
-          <label htmlFor="complaints" className="h-panel">
-            {t("complaint")}
-          </label>
-          <textarea id="complaints" name="complaints" rows={5} className="textarea" required />
-          <span className="small muted">{t("complaintHint")}</span>
-          <fieldset className="field" style={{ border: 0, margin: "8px 0 0", padding: 0 }}>
-            <legend className="h-panel" style={{ marginBottom: 12 }}>
-              {t("mechanic")}
-            </legend>
-            <div className="chips">
-              {staff.map((m, i) => (
-                <label key={m.id} className="chip">
-                  <input type="radio" name="mechanicId" value={m.id} defaultChecked={i === 0} />
-                  <Icon name="check" size={16} stroke={2.4} />
-                  {m.name}
-                </label>
-              ))}
+      <main className="frame">
+        <form action={saveIntake} className="main even">
+          <input type="hidden" name="back" value={href(params)} />
+          <section className="panel">
+            <ErrorNote code={params.e} />
+            <label htmlFor="complaints" className="h-panel">
+              {t("complaint")}
+            </label>
+            <textarea id="complaints" name="complaints" rows={5} className="textarea" required />
+            <span className="small muted">{t("complaintHint")}</span>
+            <fieldset className="field" style={{ border: 0, margin: "8px 0 0", padding: 0 }}>
+              <legend className="h-panel" style={{ marginBottom: 12 }}>
+                {t("mechanic")}
+              </legend>
+              <div className="chips">
+                {staff.map((m, i) => (
+                  <label key={m.id} className="chip">
+                    <input type="radio" name="mechanicId" value={m.id} defaultChecked={i === 0} />
+                    <Icon name="check" size={16} stroke={2.4} />
+                    {m.name}
+                  </label>
+                ))}
+              </div>
+            </fieldset>
+            <span className="small muted">{t("mechanicHint")}</span>
+          </section>
+          <section className="panel" style={{ gap: 12 }}>
+            <span className="h-panel">{t("broughtBy")}</span>
+            <div className="grid-2" style={{ gap: 12 }}>
+              <div className="field">
+                <label htmlFor="signerName">{t("signerName")}</label>
+                <input id="signerName" className="input" name="signerName" required />
+              </div>
+              <div className="field">
+                <label htmlFor="signerPhone">{t("signerPhone")}</label>
+                <input id="signerPhone" className="input" name="signerPhone" type="tel" required />
+              </div>
             </div>
-          </fieldset>
-          <span className="small muted">{t("mechanicHint")}</span>
-        </section>
-        <section className="panel" style={{ gap: 12 }}>
-          <span className="h-panel">{t("broughtBy")}</span>
-          <div className="grid-2" style={{ gap: 12 }}>
-            <div className="field">
-              <label htmlFor="signerName">{t("signerName")}</label>
-              <input id="signerName" className="input" name="signerName" required />
-            </div>
-            <div className="field">
-              <label htmlFor="signerPhone">{t("signerPhone")}</label>
-              <input id="signerPhone" className="input" name="signerPhone" type="tel" required />
-            </div>
-          </div>
-          <SignaturePad
-            name="signature"
-            label={tu("signature")}
-            clearLabel={tu("clear")}
-            invalid={params.e === "signatureMissing"}
-          />
-          <span className="spacer" />
-          <button type="submit" className="btn primary lg block">
-            <Icon name="check" stroke={2.4} />
-            {t("saveOpen")}
-          </button>
-        </section>
-      </form>
+            <SignaturePad
+              name="signature"
+              label={tu("signature")}
+              clearLabel={tu("clear")}
+              invalid={params.e === "signatureMissing"}
+            />
+            <span className="spacer" />
+            <button type="submit" className="btn primary lg block">
+              <Icon name="check" stroke={2.4} />
+              {t("saveOpen")}
+            </button>
+          </section>
+        </form>
+      </main>
     </>
   );
 }
