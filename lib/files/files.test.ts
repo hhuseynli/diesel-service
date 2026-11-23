@@ -38,6 +38,17 @@ describe("exifCaptureTime", () => {
     expect(exifCaptureTime(Uint8Array.from([0x89, 0x50, 0x4e, 0x47]))).toBeNull();
     expect(exifCaptureTime(new Uint8Array())).toBeNull();
   });
+
+  it("never throws: a cut-off file or an impossible date gives null (B2: it never blocks)", () => {
+    const whole = jpegWithCaptureTime("2026:11:22 14:05:09");
+    // The APP1 block claims more bytes than the file has.
+    for (const cut of [8, 16, 30, 50, whole.length - 10]) {
+      expect(exifCaptureTime(whole.slice(0, cut))).toBeNull();
+    }
+    expect(exifCaptureTime(jpegWithCaptureTime("2026:02:30 10:00:00"))).toBeNull();
+    expect(exifCaptureTime(jpegWithCaptureTime("2026:11:22 25:00:00"))).toBeNull();
+    expect(exifCaptureTime(jpegWithCaptureTime("0000:00:00 00:00:00"))).toBeNull();
+  });
 });
 
 describe("LocalFileStore", () => {

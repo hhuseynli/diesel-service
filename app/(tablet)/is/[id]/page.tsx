@@ -15,6 +15,9 @@ import {
   addFindingAction,
   addPartAction,
   addServiceAction,
+  assignMechanicAction,
+  cancelJobAction,
+  correctFindingAction,
   handOverAction,
   qualityCheckAction,
   removedPartAction,
@@ -30,6 +33,16 @@ import { Plate } from "../../Plate";
 
 /** Evidence for a finding: a camera photo or a short video (spec 01, 3.6; spec 00, 8). */
 const EVIDENCE_TYPES = "image/jpeg,image/png,video/mp4";
+
+const OPEN_FOR_FINDINGS: JobStatus[] = [
+  "QEBUL",
+  "BAXIS",
+  "QIYMETLENDIRME",
+  "TESDIQ_GOZLEYIR",
+  "TESDIQLENDI",
+  "HISSE_GOZLEYIR",
+  "TEMIRDE",
+];
 
 const PROGRESS: JobStatus[] = [
   "QEBUL",
@@ -93,10 +106,26 @@ export default async function JobPage({
 
   const inspecting = job.status === "QEBUL";
   const working = job.status === "TEMIRDE";
-  const staff = inspecting || working ? await mechanics(db) : [];
+  // Findings, services and parts can be added until the work is done (migration 0028).
+  const open = OPEN_FOR_FINDINGS.includes(job.status);
+  const cancellable = !["TEHVIL_VERILDI", "ODENILDI", "BAGLANDI", "LEGV"].includes(job.status);
+  const staff = open ? await mechanics(db) : [];
   const checklist = working ? await qualityChecklist(db) : [];
   const jobField = <input type="hidden" name="jobId" value={job.id} />;
   const at = progressIndex(job.status);
+  const mechanicSelect = (label: string, required: boolean) => (
+    <label>
+      {label}
+      <select name="mechanicId" required={required} defaultValue={job.mechanicId ?? ""}>
+        {!required && <option value="" />}
+        {staff.map((m) => (
+          <option key={m.id} value={m.id}>
+            {m.name}
+          </option>
+        ))}
+      </select>
+    </label>
+  );
 
   const nothing = <p className="muted">{t("nothingYet")}</p>;
 
@@ -107,18 +136,7 @@ export default async function JobPage({
         {t("finding")}
         <textarea name="description" rows={2} required />
       </label>
-      <div className="row">
-        <label>
-          {t("mechanic")}
-          <select name="mechanicId" required>
-            {staff.map((m) => (
-              <option key={m.id} value={m.id}>
-                {m.name}
-              </option>
-            ))}
-          </select>
-        </label>
-      </div>
+      <div className="row">{mechanicSelect(t("mechanic"), true)}</div>
       <div className="photo-grid">
         <PhotoInput
           name="files"
@@ -137,11 +155,12 @@ export default async function JobPage({
   const serviceForm = (
     <form action={addServiceAction} className="add">
       {jobField}
-      <div className="inline">
-        <label>
-          {t("service")}
-          <input name="description" required />
-        </label>
+      <label>
+        {t("service")}
+        <input name="description" required />
+      </label>
+      <div className="row">
+        {mechanicSelect(t("mechanicOptional"), false)}
         <button type="submit">
           <Icon name="plus" size={18} />
           {t("addService")}
@@ -229,9 +248,22 @@ export default async function JobPage({
             <dd>{job.complaints}</dd>
           </div>
         </dl>
+        {open && (
+          <form action={assignMechanicAction} className="inline">
+            {jobField}
+            {mechanicSelect(t("mechanic"), true)}
+            <button type="submit">{t("assignMechanic")}</button>
+          </form>
+        )}
       </section>
 
-      <NextStep job={job} jobField={jobField} checklist={checklist} failed={query.qc === "0"} />
+      <NextStep
+        job={job}
+        jobField={jobField}
+        checklist={checklist}
+        failed={query.qc === "0"}
+        mechanicSelect={mechanicSelect(t("mechanic"), false)}
+      />
 
       <Section icon="clipboard" title={t("findings")} count={job.findings.length}>
         {job.findings.length === 0 ? (
@@ -244,6 +276,9 @@ export default async function JobPage({
                   {f.description}
                   {f.additional && <span className="tag">{t("duringWork")}</span>}
                 </span>
+                {f.correctionReason && (
+                  <span className="sub">{t("corrects", { reason: f.correctionReason })}</span>
+                )}
                 <span className="sub">{t("byMechanic", { name: f.mechanic })}</span>
                 <span className="thumbs">
                   {f.attachmentIds.map((a) => (
@@ -251,6 +286,42 @@ export default async function JobPage({
                     <img key={a} src={`/fayl/${a}`} alt={t("findingPhotos")} />
                   ))}
                 </span>
+                {open && !inspecting && (
+                  <details className="more">
+                    <summary>
+                      <Icon name="pen" size={16} />
+                      {t("correct")}
+                    </summary>
+                    <form action={correctFindingAction}>
+                      {jobField}
+                      <input type="hidden" name="findingId" value={f.id} />
+                      <label>
+                        {t("finding")}
+                        <textarea
+                          name="description"
+                          rows={2}
+                          defaultValue={f.description}
+                          required
+                        />
+                      </label>
+                      <label>
+                        {t("correctionReason")}
+                        <input name="reason" required />
+                      </label>
+                      <div className="row">{mechanicSelect(t("mechanic"), true)}</div>
+                      <div className="photo-grid">
+                        <PhotoInput
+                          name="files"
+                          label={t("findingPhotos")}
+                          hint={ti("takePhoto")}
+                          accept={EVIDENCE_TYPES}
+                          multiple
+                        />
+                      </div>
+                      <button type="submit">{t("correct")}</button>
+                    </form>
+                  </details>
+                )}
               </li>
             ))}
           </ul>
@@ -290,12 +361,12 @@ export default async function JobPage({
         {inspecting && partForm}
       </Section>
 
-      {working && (
+      {open && !inspecting && (
         <section className="card">
           <details className="more">
             <summary>
               <Icon name="plus" size={18} />
-              {t("additionalFinding")}
+              {working ? t("additionalFinding") : t("addFindingTitle")}
             </summary>
             <div className="options">
               {findingForm}
@@ -325,6 +396,7 @@ export default async function JobPage({
                   {t("removedPart")}
                   <input name="description" required />
                 </label>
+                {mechanicSelect(t("mechanic"), false)}
                 <label>
                   {t("disposition")}
                   <select name="disposition">
@@ -344,6 +416,27 @@ export default async function JobPage({
             </form>
           )}
         </Section>
+      )}
+
+      {cancellable && (
+        <details className="more no-print">
+          <summary>
+            <Icon name="alert" size={18} />
+            {t("cancel")}
+          </summary>
+          <form action={cancelJobAction} className="card">
+            {jobField}
+            <div className="inline">
+              <label>
+                {t("cancelReason")}
+                <input name="reason" required />
+              </label>
+              <button type="submit" className="danger">
+                {t("cancelConfirm")}
+              </button>
+            </div>
+          </form>
+        </details>
       )}
 
       <details className="more no-print">
@@ -373,11 +466,13 @@ async function NextStep({
   jobField,
   checklist,
   failed,
+  mechanicSelect,
 }: {
   job: JobCard;
   jobField: ReactNode;
   checklist: string[];
   failed: boolean;
+  mechanicSelect: ReactNode;
 }) {
   const t = await getTranslations("job");
   const ti = await getTranslations("intake");
@@ -447,6 +542,7 @@ async function NextStep({
                 required
               />
             </div>
+            <div className="row">{mechanicSelect}</div>
             <label>
               {t("notes")}
               <textarea name="notes" rows={2} />

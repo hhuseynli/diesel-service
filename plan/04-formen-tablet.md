@@ -90,8 +90,33 @@ Each has the standard triggers and grants. Findings can only be added after "Anb
 | C8 | **An additional finding during work is stored with `additional = true`.** The ELAVE_AKT document it becomes is created by the warehouse in milestone 5. | Estimates are milestone 5. |
 | C9 | **The e2e test takes the warehouse and approval steps through `lib`** as a WAREHOUSEMAN and MANAGEMENT user, and raises the tablet idle timeout for its own run. | Those screens come in milestones 5 and 6; dev-server compiles exceed the 3-second idle used by the auth test. |
 | C10 | **Display formats:** `Quantity.formatAz()` and `groupThousands()` in `lib/money` (decimal comma, space between thousands). | azerbaijani-ui. |
+| C11 | **Every tablet page checks the session itself** (`requireSessionUser`), not only the layout. | Review: Next renders a page in parallel with its layout, so a signed-out RSC request got the page's data. |
+| C12 | **Rules moved from lib into the database** (migrations 0027–0030): rows are added from QEBUL until the work is done, and the database marks them additional once the estimate is with the client (TESDIQ_GOZLEYIR on); removed parts and quality checks only in TEMIRDE; every mechanic named on a work row holds MECHANIC; a planned service changes only its catalog item and mechanic; intake photos are images and finding evidence is a photo or MP4; an intake photo belongs to one job (unique). | Review: the screen decided "additional", and closed jobs accepted parts requests. |
+| C13 | **Mechanic on every work row (R3):** services, removed parts and the quality check take a mechanic; the job's mechanic can be set later on the job card. | Spec 01 §1, §3.6. |
+| C14 | **Corrections to findings** after inspection are new rows (`corrects_id`) with a required `correction_reason`. | Spec 01 §3.6. |
+| C15 | **The VIN check is recorded** on the intake confirmation (`vin_check`: LAST6_CONFIRMED, or NEW_VEHICLE when the VIN was typed from the car). The intake photos must be the formen's own uploads from the last day. | R8; review: any attachment id could be passed as a photo. |
+| C16 | **The odometer sits on the photo step** and is checked there (whole kilometres; a reason when lower), then again at "Saxla". | Spec 01 §3.4; review: an empty field became 0. |
+| C17 | **The sticker carries the QR code only**; the car is shown on screen beside it. A lost sticker can be reprinted from the VIN check at intake. A reprint uses 128 random bits, and a label printed before sticker rows existed is kept as REPLACED so it still warns. | Spec 01 §3.2, §4; R8. |
+| C18 | **The EXIF check never blocks** an upload: a cut-off file or an impossible date gives "no capture time". | B2. |
+| C19 | **Cancelling (LEGV) is on the job card** with a reason; the formen while in QEBUL, management after (lib/permissions). The management list of cancelled jobs comes with the office screens. | Spec 01 §6. |
+| C20 | **Board:** nine status lanes (a handed-over car has left the workshop, so TEHVIL_VERILDI is never on the board); each card shows the plate and the last 6 VIN characters. | Spec 01 §3.1 lists six columns; the lifecycle (spec 00 §4) has nine open statuses. |
+| C21 | **Design system** in `app/globals.css` with small components (`Icon`, `PhotoInput`, `Plate`, `AuthBrand`): app bar, status colours, step indicator, photo tiles with previews, the job card built around one "next step". | B12; the first screens were unstyled. |
+| C22 | **Not in this milestone, recorded:** client messages (spec 01 §5) wait for the outbox (milestone 6); services picked from the catalog (§3.6) and AC7 (warehouse queue) are milestone 5; AC2 (decoded fields) waits for R19; a checklist item added to `quality_checklist` needs its translation key, or its raw key shows. | Scope. |
+| C23 | **B1 and B2 as built:** intake photos are stored at "Davam et" and linked at "Saxla" in a later transaction, through join tables rather than `attachments.linked_*`; inputs accept `image/jpeg,image/png` (findings also `video/mp4`). | Review: the decisions' wording differed from the code. |
+
+### Spec updates needed (Aykhan; Claude doesn't edit spec/)
+
+| # | Spec text | This milestone does |
+| --- | --- | --- |
+| F33 | spec 01 AC3 "cannot be saved without six photos…" | `receiveVehicle` refuses to save without them; the database enforces it when the job leaves QEBUL (a QEBUL row can exist only inside that transaction). |
+| F34 | spec 01 §3.1 six board columns | Nine lanes (C20). |
+| F35 | spec 01 §4 "random, 128-bit" token | Reprints use 128 bits; a vehicle's first token is a UUIDv4 (122 random bits) from milestone 1. Suggest "at least 122 random bits". |
+| F36 | spec 00 §3a rule 2: a plate row records the visit (`job_order_id`) | A plate entered at intake is written before the job exists, so it has none; the job's `plate_snapshot` records it. |
+| F37 | spec 01 §3.6 "findings can only be added" after "Anbara göndər" | They can be added until the work is done; they are additional (ELAVE_AKT) once the estimate is with the client (C12). |
 
 ## Open items that don't block this milestone
+
+- `APP_URL` must be set in production: the sticker's QR code is built from it (otherwise from the request's Host header).
 
 - spec 01 open questions 1–5;
 - R19 (the VIN decoder provider);

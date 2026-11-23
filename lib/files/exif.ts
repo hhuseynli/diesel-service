@@ -1,11 +1,43 @@
 // Reads DateTimeOriginal from a JPEG's EXIF block (plan 04, B2). A browser cannot prove a
 // photo came from the camera; the capture time, compared with the server's time at
-// upload, is recorded as evidence (R2). Returns "YYYY:MM:DD HH:MM:SS" or null.
+// upload, is recorded as evidence (R2). Returns "YYYY:MM:DD HH:MM:SS" or null. It never
+// throws: a cut-off file or a camera with a bad clock gives null, and the upload goes on.
 
 const DATE_TIME_ORIGINAL = 0x9003;
 const EXIF_IFD_POINTER = 0x8769;
 
 export function exifCaptureTime(bytes: Uint8Array): string | null {
+  try {
+    const text = findCaptureTime(bytes);
+    return text !== null && isRealDateTime(text) ? text : null;
+  } catch {
+    // Offsets pointing past the end of a cut-off file.
+    return null;
+  }
+}
+
+/** "2026:02:30 10:00:00" or "...25:00:00" pass the pattern but are not real times. */
+function isRealDateTime(text: string): boolean {
+  const [y, mo, d, h, mi, s] = text.split(/[: ]/).map(Number) as [
+    number,
+    number,
+    number,
+    number,
+    number,
+    number,
+  ];
+  const t = new Date(Date.UTC(y, mo - 1, d, h, mi, s));
+  return (
+    t.getUTCFullYear() === y &&
+    t.getUTCMonth() === mo - 1 &&
+    t.getUTCDate() === d &&
+    t.getUTCHours() === h &&
+    t.getUTCMinutes() === mi &&
+    t.getUTCSeconds() === s
+  );
+}
+
+function findCaptureTime(bytes: Uint8Array): string | null {
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   if (bytes.length < 4 || view.getUint16(0) !== 0xffd8) return null; // not a JPEG
   let offset = 2;

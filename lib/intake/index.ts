@@ -1,5 +1,7 @@
+import { randomBytes } from "node:crypto";
 import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import {
+  attachments,
   contragents,
   documentSignatures,
   inspectionFindingAttachments,
@@ -56,12 +58,16 @@ export class OdometerReasonRequiredError extends Error {
 /** Each intake photo is evidence for one job only: six distinct, unused attachments. */
 export class IntakePhotoReusedError extends Error {}
 
+/** How the car was matched to its VIN (3.2; R8). */
+export type VinCheck = "LAST6_CONFIRMED" | "NEW_VEHICLE";
+
 export interface ReceiveInput extends Omit<OpenJobInput, "ownerChanged"> {
   /** Required only when the client differs from the vehicle's last job. */
   ownerChanged?: boolean;
   photos: Record<IntakeSlot, string>;
   odometer: { valueKm: number; reason?: string };
   confirmation: { signerName: string; signerPhone: string; signatureAttachmentId: string };
+  vinCheck: VinCheck;
 }
 
 export interface ReceiveResult {
@@ -120,12 +126,25 @@ export async function receiveVehicle(tx: Tx, input: ReceiveInput): Promise<Recei
   if (new Set(photoIds).size !== photoIds.length) {
     throw new IntakePhotoReusedError("The six intake photos must be different files");
   }
+  // Taken for this intake: uploaded by this formen today, and not on another job.
+  const [fresh] = await tx
+    .select({ n: sql<number>`count(*)::int` })
+    .from(attachments)
+    .where(
+      and(
+        inArray(attachments.id, photoIds),
+        sql`${attachments.createdBy} = current_actor()`,
+        sql`${attachments.createdAt} > now() - interval '1 day'`,
+      ),
+    );
   const [used] = await tx
     .select({ id: intakePhotos.id })
     .from(intakePhotos)
     .where(inArray(intakePhotos.attachmentId, photoIds))
     .limit(1);
-  if (used) throw new IntakePhotoReusedError("An intake photo already belongs to another job");
+  if (fresh!.n !== photoIds.length || used) {
+    throw new IntakePhotoReusedError("Intake photos are taken for this intake, by this formen");
+  }
 
   const lastClient = await lastClientOf(tx, input.vehicleId);
   const asked = lastClient !== null && lastClient !== input.contragentId;
@@ -160,6 +179,7 @@ export async function receiveVehicle(tx: Tx, input: ReceiveInput): Promise<Recei
     signerName: input.confirmation.signerName.trim(),
     signerPhone: input.confirmation.signerPhone.trim(),
     signatureAttachmentId: input.confirmation.signatureAttachmentId,
+    vinCheck: input.vinCheck,
   });
 
   const [sticker] = await tx
@@ -188,37 +208,8 @@ export async function receiveVehicle(tx: Tx, input: ReceiveInput): Promise<Recei
 }
 
 // --- Inspection (spec 01, 3.6) -----------------------------------------------------
-
-/** Findings, services and parts are added from intake until the work is done. */
-export class InspectionClosedError extends Error {}
-
-const OPEN_FOR_FINDINGS = [
-  "QEBUL",
-  "BAXIS",
-  "QIYMETLENDIRME",
-  "TESDIQ_GOZLEYIR",
-  "TESDIQLENDI",
-  "HISSE_GOZLEYIR",
-  "TEMIRDE",
-];
-/** From here the estimate is with the client: anything new is an ELAVE_AKT request. */
-const ESTIMATE_SENT = ["TESDIQ_GOZLEYIR", "TESDIQLENDI", "HISSE_GOZLEYIR", "TEMIRDE"];
-
-/**
- * Whether what is recorded now is additional or part of the inspection (spec 01, 3.6-3.7).
- * Decided from the job's status, never by the screen; the row lock keeps the status from
- * changing until the transaction ends.
- */
-async function inspectionStage(tx: Tx, jobId: string): Promise<{ additional: boolean }> {
-  const { rows } = await tx.execute<{ status: string }>(
-    sql`SELECT status FROM job_orders WHERE id = ${jobId} FOR SHARE`,
-  );
-  const status = rows[0]?.status ?? "";
-  if (!OPEN_FOR_FINDINGS.includes(status)) {
-    throw new InspectionClosedError(`Nothing is added to a job in ${status || "no status"}`);
-  }
-  return { additional: ESTIMATE_SENT.includes(status) };
-}
+// Rows are added from intake until the work is done; the database refuses them on a
+// closed job and marks them additional once the estimate is with the client (0028).
 
 export async function addFinding(
   tx: Tx,
@@ -226,7 +217,6 @@ export async function addFinding(
   input: { mechanicId: string; description: string; attachmentIds: string[] },
 ): Promise<string> {
   await requirePermission(tx, "RECORD_INSPECTION");
-  const { additional } = await inspectionStage(tx, jobId);
   if (input.attachmentIds.length === 0) {
     throw new Error("A finding needs at least one photo or video (R2)");
   }
@@ -236,7 +226,6 @@ export async function addFinding(
       jobOrderId: jobId,
       mechanicId: input.mechanicId,
       description: input.description.trim(),
-      additional,
     })
     .returning({ id: inspectionFindings.id });
   await tx
@@ -245,20 +234,61 @@ export async function addFinding(
   return finding!.id;
 }
 
+/**
+ * A correction to a finding once inspection is over (3.6): a new row pointing at the one
+ * it corrects, with the reason. The original stays as it was.
+ */
+export async function correctFinding(
+  tx: Tx,
+  findingId: string,
+  input: { description: string; mechanicId: string; attachmentIds: string[] },
+  reason: string,
+): Promise<string> {
+  await requirePermission(tx, "RECORD_INSPECTION");
+  if (reason.trim() === "") throw new ClientInputError("A correction needs a reason");
+  const [original] = await tx
+    .select({ jobId: inspectionFindings.jobOrderId })
+    .from(inspectionFindings)
+    .where(eq(inspectionFindings.id, findingId));
+  if (!original) throw new ClientInputError("No such finding");
+  const [row] = await withReason(tx, reason.trim(), () =>
+    tx
+      .insert(inspectionFindings)
+      .values({
+        jobOrderId: original.jobId,
+        mechanicId: input.mechanicId,
+        description: input.description.trim(),
+        correctsId: findingId,
+        correctionReason: reason.trim(),
+      })
+      .returning({ id: inspectionFindings.id }),
+  );
+  await tx
+    .insert(inspectionFindingAttachments)
+    .values(input.attachmentIds.map((attachmentId) => ({ findingId: row!.id, attachmentId })));
+  return row!.id;
+}
+
+/** The job's mechanic, chosen at intake or later (3.6, "Select the mechanic"). */
+export async function assignMechanic(tx: Tx, jobId: string, mechanicId: string): Promise<void> {
+  await requirePermission(tx, "RECORD_INSPECTION");
+  await withReason(tx, "audit.mechanicAssigned", () =>
+    tx.update(jobOrders).set({ mechanicId }).where(eq(jobOrders.id, jobId)),
+  );
+}
+
 export async function addPlannedService(
   tx: Tx,
   jobId: string,
   input: { description: string; mechanicId?: string },
 ): Promise<string> {
   await requirePermission(tx, "RECORD_INSPECTION");
-  const { additional } = await inspectionStage(tx, jobId);
   const [row] = await tx
     .insert(plannedServices)
     .values({
       jobOrderId: jobId,
       description: input.description.trim(),
       mechanicId: input.mechanicId,
-      additional,
     })
     .returning({ id: plannedServices.id });
   return row!.id;
@@ -270,7 +300,6 @@ export async function addPartsRequest(
   input: { description: string; quantity: string; unitHint?: string },
 ): Promise<string> {
   await requirePermission(tx, "RECORD_INSPECTION");
-  const { additional } = await inspectionStage(tx, jobId);
   const [row] = await tx
     .insert(partsRequests)
     .values({
@@ -278,7 +307,6 @@ export async function addPartsRequest(
       description: input.description.trim(),
       quantity: Quantity.parse(input.quantity).toDb(),
       unitHint: input.unitHint?.trim() || null,
-      additional,
     })
     .returning({ id: partsRequests.id });
   return row!.id;
@@ -303,6 +331,7 @@ export async function recordRemovedPart(
     description: string;
     photoId: string;
     disposition: "RETURNED_TO_CLIENT" | "DISPOSED" | "WARRANTY_CLAIM";
+    mechanicId?: string;
   },
 ): Promise<string> {
   await requirePermission(tx, "RECORD_INSPECTION");
@@ -399,17 +428,31 @@ export async function reprintSticker(tx: Tx, vehicleId: string, reason: string):
   await requirePermission(tx, "PRINT_STICKER");
   if (reason.trim() === "") throw new Error("A reprint needs a reason");
   return withReason(tx, reason.trim(), async () => {
-    await tx
+    const replaced = await tx
       .update(qrStickers)
       .set({ status: "REPLACED", replaceReason: reason.trim() })
-      .where(and(eq(qrStickers.vehicleId, vehicleId), eq(qrStickers.status, "ACTIVE")));
-    const [v] = await tx
-      .update(vehicles)
-      .set({ qrToken: sql`replace(gen_random_uuid()::text, '-', '')` })
-      .where(eq(vehicles.id, vehicleId))
-      .returning({ qrToken: vehicles.qrToken });
-    await tx.insert(qrStickers).values({ vehicleId, qrToken: v!.qrToken });
-    return v!.qrToken;
+      .where(and(eq(qrStickers.vehicleId, vehicleId), eq(qrStickers.status, "ACTIVE")))
+      .returning({ id: qrStickers.id });
+    const [current] = await tx
+      .select({ qrToken: vehicles.qrToken })
+      .from(vehicles)
+      .where(eq(vehicles.id, vehicleId));
+    if (!current) throw new ClientInputError("No such vehicle");
+    if (replaced.length === 0) {
+      // A label printed before stickers were recorded: keep its token as replaced, so a
+      // scan of it still warns instead of finding nothing.
+      await tx.insert(qrStickers).values({
+        vehicleId,
+        qrToken: current.qrToken,
+        status: "REPLACED",
+        replaceReason: reason.trim(),
+      });
+    }
+    // 128 random bits (spec 01, section 4).
+    const token = randomBytes(16).toString("hex");
+    await tx.update(vehicles).set({ qrToken: token }).where(eq(vehicles.id, vehicleId));
+    await tx.insert(qrStickers).values({ vehicleId, qrToken: token });
+    return token;
   });
 }
 

@@ -34,7 +34,8 @@
     "sentToWarehouse": "Anbara göndərildi",
     "workStarted": "Təmirə başlanıldı",
     "qualityPassed": "Keyfiyyət yoxlamasından keçdi",
-    "handedOver": "Maşın təhvil verildi"
+    "handedOver": "Maşın təhvil verildi",
+    "mechanicAssigned": "Təmirçi təyin edildi"
   },
   "auth": {
     "signInTitle": "Ofis girişi",
@@ -189,7 +190,8 @@
     "lastVisitPhoto": "Son ziyarətdəki şəkil",
     "stepOf": "Addım {n} / 4",
     "summary": "Yürüş: {km} km",
-    "kmFirst": "Bu maşın üçün ilk yürüş qeydi."
+    "kmFirst": "Bu maşın üçün ilk yürüş qeydi.",
+    "lostSticker": "Stiker itib və ya zədələnib"
   },
   "job": {
     "title": "İş sifarişi {number}",
@@ -254,7 +256,15 @@
     "facts": "Məlumat",
     "stickerSection": "QR stiker",
     "addFindingTitle": "Yeni nasazlıq",
-    "waitingTitle": "Gözlənilir"
+    "waitingTitle": "Gözlənilir",
+    "correct": "Düzəliş et",
+    "correctionReason": "Düzəlişin səbəbi",
+    "corrects": "Düzəliş: {reason}",
+    "assignMechanic": "Təmirçini təyin et",
+    "cancel": "İş sifarişini ləğv et",
+    "cancelReason": "Ləğvin səbəbi",
+    "cancelConfirm": "Ləğv et",
+    "mechanicOptional": "Təmirçi"
   },
   "sticker": {
     "title": "QR stiker",
@@ -274,7 +284,8 @@
     "conditionsMissing": "Bu addım üçün şərtlər tamamlanmayıb.",
     "signatureMissing": "İmza atılmayıb.",
     "notFound": "Maşın tapılmadı.",
-    "invalidInput": "Məlumat düzgün daxil edilməyib. Yoxlayıb yenidən göndərin."
+    "invalidInput": "Məlumat düzgün daxil edilməyib. Yoxlayıb yenidən göndərin.",
+    "photosReused": "Qəbul şəkilləri bu qəbul üçün indi çəkilməlidir. Şəkilləri yenidən çəkin."
   },
   "app": {
     "brand": "Diesel Motors",

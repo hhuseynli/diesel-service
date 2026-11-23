@@ -144,6 +144,7 @@ export interface JobCard {
   plate: string | null;
   client: string;
   mechanic: string | null;
+  mechanicId: string | null;
   complaints: string | null;
   findings: {
     id: string;
@@ -151,6 +152,9 @@ export interface JobCard {
     mechanic: string;
     additional: boolean;
     attachmentIds: string[];
+    /** Set on a correction: the finding it corrects and why. */
+    correctsId: string | null;
+    correctionReason: string | null;
   }[];
   services: { id: string; description: string }[];
   parts: {
@@ -175,10 +179,11 @@ export async function jobCard(db: Db | Tx, jobId: string): Promise<JobCard | nul
     plate: string | null;
     client: string;
     mechanic: string | null;
+    mechanic_id: string | null;
     complaints: string | null;
   }>(sql`
     SELECT j.id, j.number, j.status, j.vehicle_id, v.make, v.model, j.vin_snapshot AS vin,
-           j.plate_snapshot AS plate, c.name AS client, m.full_name AS mechanic, j.complaints
+           j.plate_snapshot AS plate, c.name AS client, m.full_name AS mechanic, j.mechanic_id, j.complaints
       FROM job_orders j
       JOIN vehicles v ON v.id = j.vehicle_id
       JOIN contragents c ON c.id = j.contragent_id
@@ -192,8 +197,11 @@ export async function jobCard(db: Db | Tx, jobId: string): Promise<JobCard | nul
     mechanic: string;
     additional: boolean;
     attachment_ids: string[];
+    corrects_id: string | null;
+    correction_reason: string | null;
   }>(sql`
-    SELECT f.id, f.description, u.full_name AS mechanic, f.additional,
+    SELECT f.id, f.description, u.full_name AS mechanic, f.additional, f.corrects_id,
+           f.correction_reason,
            array(SELECT a.attachment_id::text FROM inspection_finding_attachments a
                   WHERE a.finding_id = f.id ORDER BY a.created_at) AS attachment_ids
       FROM inspection_findings f JOIN users u ON u.id = f.mechanic_id
@@ -224,6 +232,7 @@ export async function jobCard(db: Db | Tx, jobId: string): Promise<JobCard | nul
     plate: j.plate,
     client: j.client,
     mechanic: j.mechanic,
+    mechanicId: j.mechanic_id,
     complaints: j.complaints,
     findings: findings.rows.map((f) => ({
       id: f.id,
@@ -231,6 +240,8 @@ export async function jobCard(db: Db | Tx, jobId: string): Promise<JobCard | nul
       mechanic: f.mechanic,
       additional: f.additional,
       attachmentIds: f.attachment_ids,
+      correctsId: f.corrects_id,
+      correctionReason: f.correction_reason,
     })),
     services: services.rows,
     parts: parts.rows.map((p) => ({ ...p, unitHint: p.unit_hint })),

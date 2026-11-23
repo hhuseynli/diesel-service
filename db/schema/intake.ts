@@ -47,6 +47,8 @@ export const intakePhotos = pgTable(
   },
   (t) => [
     unique("intake_photos_job_slot").on(t.jobOrderId, t.slot),
+    // A photo is evidence for one job only (plan 04, C3).
+    unique("intake_photos_attachment").on(t.attachmentId),
     check(
       "intake_photos_slot",
       sql`${t.slot} IN ('ODOMETER', 'FRONT', 'REAR', 'LEFT', 'RIGHT', 'DASHBOARD')`,
@@ -99,11 +101,18 @@ export const intakeConfirmations = pgTable(
     signerName: text("signer_name").notNull(),
     signerPhone: text("signer_phone").notNull(),
     signatureAttachmentId: uuid("signature_attachment_id").references(() => attachments.id),
+    // How the formen matched the car to its VIN (spec 01, 3.2; R8): the last six
+    // characters checked on the car, or the VIN typed from the car for a new vehicle.
+    vinCheck: text("vin_check").notNull(),
     createdAt: createdAt(),
     createdBy: createdBy(),
   },
   (t) => [
     check("intake_confirmations_method", sql`${t.method} IN ('SIGNATURE', 'OTP')`),
+    check(
+      "intake_confirmations_vin_check",
+      sql`${t.vinCheck} IN ('LAST6_CONFIRMED', 'NEW_VEHICLE')`,
+    ),
     check(
       "intake_confirmations_signature",
       sql`${t.method} <> 'SIGNATURE' OR ${t.signatureAttachmentId} IS NOT NULL`,
@@ -133,10 +142,19 @@ export const inspectionFindings = pgTable(
     // Found during work (TEMIRDE): becomes an ELAVE_AKT request (spec 01, 3.7).
     additional: boolean("additional").notNull().default(false),
     correctsId: uuid("corrects_id").references((): AnyPgColumn => inspectionFindings.id),
+    // A correction after "Anbara göndər" says why (spec 01, 3.6).
+    correctionReason: text("correction_reason"),
     createdAt: createdAt(),
     createdBy: createdBy(),
   },
-  (t) => [check("inspection_findings_description", sql`btrim(${t.description}) <> ''`)],
+  (t) => [
+    check("inspection_findings_description", sql`btrim(${t.description}) <> ''`),
+    check(
+      "inspection_findings_correction_reason",
+      sql`(${t.correctsId} IS NULL AND ${t.correctionReason} IS NULL)
+          OR (${t.correctsId} IS NOT NULL AND coalesce(btrim(${t.correctionReason}), '') <> '')`,
+    ),
+  ],
 );
 
 export const inspectionFindingAttachments = pgTable(
@@ -264,6 +282,8 @@ export const removedParts = pgTable(
       .notNull()
       .references(() => attachments.id),
     disposition: text("disposition").notNull(),
+    // Who replaced it (R3); the formen names the mechanic.
+    mechanicId: uuid("mechanic_id").references(() => users.id),
     createdAt: createdAt(),
     createdBy: createdBy(),
   },

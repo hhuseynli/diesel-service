@@ -1,0 +1,3 @@
+ALTER TABLE "inspection_findings" DROP CONSTRAINT "inspection_findings_correction_reason";--> statement-breakpoint
+ALTER TABLE "inspection_findings" ADD CONSTRAINT "inspection_findings_correction_reason" CHECK (("inspection_findings"."corrects_id" IS NULL AND "inspection_findings"."correction_reason" IS NULL)
+          OR ("inspection_findings"."corrects_id" IS NOT NULL AND coalesce(btrim("inspection_findings"."correction_reason"), '') <> ''));

@@ -28,6 +28,7 @@ import {
   identifyByQr,
   identifyByVin,
   saveIntake,
+  reprintStickerAction,
   uploadIntakePhotos,
 } from "../actions";
 import { ErrorNote } from "../ErrorNote";
@@ -99,6 +100,7 @@ export default async function IntakePage({ searchParams }: { searchParams: Promi
   await requireSessionUser();
   const params = await searchParams;
   const t = await getTranslations("intake");
+  const tj = await getTranslations("job");
   const db = getDb();
   const self = href(params);
 
@@ -181,6 +183,9 @@ export default async function IntakePage({ searchParams }: { searchParams: Promi
               </div>
             </form>
             {params.pl && plates.length === 0 && <p className="muted">{t("notFound")}</p>}
+            {plates.some((r) => r.label === "UNCONFIRMED") && (
+              <p role="alert">{t("plateElsewhere")}</p>
+            )}
             {plates.length > 0 && (
               <ul className="results">
                 {plates.map((r) => (
@@ -290,6 +295,23 @@ export default async function IntakePage({ searchParams }: { searchParams: Promi
             </Link>
           </div>
         </section>
+        <details className="more">
+          <summary>
+            <Icon name="printer" size={18} />
+            {t("lostSticker")}
+          </summary>
+          <form action={reprintStickerAction} className="card">
+            <input type="hidden" name="vehicleId" value={vehicle.id} />
+            <input type="hidden" name="back" value={self} />
+            <div className="inline">
+              <label>
+                {tj("reprintReason")}
+                <input name="reason" required />
+              </label>
+              <button type="submit">{tj("reprintSticker")}</button>
+            </div>
+          </form>
+        </details>
       </main>
     );
   }
