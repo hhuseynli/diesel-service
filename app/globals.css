@@ -307,6 +307,13 @@ button.primary:hover {
   background: #1e40af;
 }
 
+.btn.danger,
+button.danger {
+  background: var(--danger);
+  border-color: var(--danger);
+  color: #fff;
+}
+
 .btn.large,
 button.large {
   min-height: 56px;

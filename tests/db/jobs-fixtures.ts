@@ -61,6 +61,7 @@ export async function newJob(
         signerPhone: "+994551112233",
         signatureAttachmentId: await fakeAttachment(tx),
       },
+      vinCheck: "LAST6_CONFIRMED",
     });
     return { id: received.jobId, number: received.number, contractCheck: received.contractCheck };
   });

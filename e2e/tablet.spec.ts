@@ -188,7 +188,10 @@ test("a new car from intake to handover", async () => {
 
   // Inspection: a finding with a photo, a service and a part, then to the warehouse.
   await page.getByLabel(az.job.finding).fill("Ön əyləc diskləri yeyilib");
-  await page.getByLabel(az.job.mechanic).selectOption({ label: MECHANIC.name });
+  await page
+    .locator("form", { has: page.getByLabel(az.job.finding) })
+    .getByLabel(az.job.mechanic)
+    .selectOption({ label: MECHANIC.name });
   await page.getByLabel(az.job.findingPhotos).setInputFiles(photo("finding"));
   await page.getByRole("button", { name: az.job.addFinding }).click();
   await expect(main().getByText("Ön əyləc diskləri yeyilib")).toBeVisible();

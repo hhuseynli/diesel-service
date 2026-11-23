@@ -74,6 +74,7 @@ async function intakeInput(
         signerPhone: "+994551112233",
         signatureAttachmentId: await fakeAttachment(tx),
       },
+      vinCheck: "LAST6_CONFIRMED",
       ...extra,
     };
   });
@@ -119,6 +120,7 @@ describe("AC3: a job leaves QEBUL only with six photos, an odometer reading and 
         signerName: "Sürücü",
         signerPhone: "+994551112233",
         signatureAttachmentId: await fakeAttachment(tx),
+        vinCheck: "LAST6_CONFIRMED",
       }),
     );
     await toBaxis();
