@@ -31,6 +31,7 @@ export function PhotoInput({
       <input
         className="visually-hidden"
         type="file"
+        aria-label={label}
         name={name}
         accept={accept}
         capture="environment"
