@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import "./globals.css";
 import { NextIntlClientProvider } from "next-intl";
 import { getLocale, getTranslations } from "next-intl/server";
 

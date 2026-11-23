@@ -34,7 +34,8 @@ let client: string;
 
 beforeAll(async () => {
   t = await createTestDb();
-  formen = await createUser(t.migratorPool, { roles: ["FORMEN"] });
+  // Walks every transition, so it holds OWNER; permissions.db.test checks each role.
+  formen = await createUser(t.migratorPool, { roles: ["FORMEN", "OWNER"] });
   cashier = await createUser(t.migratorPool, { roles: ["CASHIER"] });
   client = await newClient(t.db, formen);
 });
@@ -68,6 +69,10 @@ const ALLOWED: Record<string, JobStatus[]> = {
   TEHVIL_VERILDI: ["ODENILDI"],
 };
 
+/** The cashier takes payment; the formen hands the car over (spec 00, section 4). */
+const actorFor = (status: "ODENILDI" | "TEHVIL_VERILDI") =>
+  status === "ODENILDI" ? cashier : formen;
+
 describe("happy paths close automatically", () => {
   it.each([
     ["paid first", "ODENILDI", "TEHVIL_VERILDI"],
@@ -75,10 +80,14 @@ describe("happy paths close automatically", () => {
   ] as const)("%s", async (_, first, second) => {
     const job = await jobAt("HAZIR");
     expect(
-      await withActor(t.db, { userId: cashier }, (tx) => moveJob(tx, job.id, first, "test")),
+      await withActor(t.db, { userId: actorFor(first) }, (tx) =>
+        moveJob(tx, job.id, first, "test"),
+      ),
     ).toBe(first);
     expect(
-      await withActor(t.db, { userId: formen }, (tx) => moveJob(tx, job.id, second, "test")),
+      await withActor(t.db, { userId: actorFor(second) }, (tx) =>
+        moveJob(tx, job.id, second, "test"),
+      ),
     ).toBe("BAGLANDI");
     expect(await statusOf(job.id)).toBe("BAGLANDI");
 
@@ -95,11 +104,16 @@ describe("happy paths close automatically", () => {
       userId: formen,
       reason: "audit.jobOpened",
     });
-    expect(history.at(-3)).toMatchObject({ toStatus: first, userId: cashier, reason: "test" });
+    expect(history.at(-3)).toMatchObject({
+      toStatus: first,
+      userId: actorFor(first),
+      reason: "test",
+    });
     expect(history.at(-1)).toMatchObject({
       fromStatus: second,
       toStatus: "BAGLANDI",
-      userId: formen,
+      // The automatic close is recorded under whoever completed the second step.
+      userId: actorFor(second),
       reason: "audit.jobClosed",
     });
     for (const [i, e] of history.entries()) {

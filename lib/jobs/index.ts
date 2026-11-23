@@ -4,6 +4,7 @@ import { withReason } from "@/lib/audit";
 import { checkContract } from "@/lib/contracts";
 import type { Db, Tx } from "@/lib/db/types";
 import { assignNumber } from "@/lib/numbering";
+import { requireJobTransition, requirePermission } from "@/lib/permissions";
 import type { Role } from "@/lib/users/roles";
 import {
   TERMINAL_JOB_STATUSES,
@@ -53,6 +54,7 @@ export async function openJob(
   tx: Tx,
   input: OpenJobInput,
 ): Promise<{ id: string; number: string; contractCheck: ContractCheck }> {
+  await requirePermission(tx, "CREATE_JOB");
   const [open] = await tx
     .select({ id: jobOrders.id })
     .from(jobOrders)
@@ -143,6 +145,7 @@ export async function moveJob(
   // silently doing nothing.
   const current = await lockJob(tx, jobId);
   if (current === to) throw new Error(`Job ${jobId} is already ${to}`);
+  await requireJobTransition(tx, current, to);
   await setStatus(tx, jobId, to, reason);
 
   if (to === "ODENILDI" || to === "TEHVIL_VERILDI") {
@@ -162,7 +165,7 @@ export async function moveJob(
 /** Cancels a job (LEGV) with a reason; not possible after handover or payment. */
 export async function cancelJob(tx: Tx, jobId: string, reason: string): Promise<void> {
   if (reason.trim() === "") throw new Error("Cancelling a job needs a reason");
-  await lockJob(tx, jobId);
+  await requireJobTransition(tx, await lockJob(tx, jobId), "LEGV");
   await withReason(tx, reason, () =>
     tx
       .update(jobOrders)
@@ -173,11 +176,11 @@ export async function cancelJob(tx: Tx, jobId: string, reason: string): Promise<
 
 /**
  * Releases a job held for management (spec 01, 3.3; plan 02, C3): it continues as a
- * separate paid job. The audit row records who decided and why. The management role
- * check arrives with permissions in milestone 3.
+ * separate paid job. The audit row records who decided and why. Management only.
  */
 export async function resolveHold(tx: Tx, jobId: string, reason: string): Promise<void> {
   if (reason.trim() === "") throw new Error("Resolving a hold needs a reason");
+  await requirePermission(tx, "RESOLVE_HOLD");
   await lockJob(tx, jobId);
   const updated = await withReason(tx, reason, () =>
     tx

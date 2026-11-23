@@ -1,6 +1,7 @@
 import { sql } from "drizzle-orm";
 import { toGuardError, type DbGuardError } from "@/lib/db/errors";
 import type { Db, Tx } from "@/lib/db/types";
+import { PermissionError } from "@/lib/permissions";
 
 // Every write runs inside withActor (audit-rules skill, rules 2 and 6). The database
 // reads the actor and the reason from these transaction settings in its triggers.
@@ -14,8 +15,9 @@ export interface Actor {
 
 /**
  * Runs fn in a transaction attributed to the actor. If the database refuses the write
- * (locked document, delete, missing privilege...), the refusal is recorded as a DENIED
- * audit row in a separate transaction, then rethrown as a typed error.
+ * (locked document, delete, missing privilege...) or the permission matrix does (plan 03,
+ * A5), the refusal is recorded as a DENIED audit row in a separate transaction, then
+ * rethrown (database refusals as typed errors).
  */
 export async function withActor<T>(db: Db, actor: Actor, fn: (tx: Tx) => Promise<T>): Promise<T> {
   try {
@@ -24,6 +26,18 @@ export async function withActor<T>(db: Db, actor: Actor, fn: (tx: Tx) => Promise
       return fn(tx);
     });
   } catch (e) {
+    if (e instanceof PermissionError) {
+      await logDenied(db, actor, {
+        table: undefined,
+        name: "PermissionError",
+        sqlstate: "PERMISSION",
+        message: e.message,
+        recordId: undefined,
+      }).catch((logError: unknown) => {
+        console.error("audit: could not record a DENIED row", logError);
+      });
+      throw e;
+    }
     const denial = toGuardError(e);
     if (!denial) throw e;
     await logDenied(db, actor, denial).catch((logError: unknown) => {
@@ -60,7 +74,11 @@ async function applyActor(tx: Tx, actor: Actor): Promise<void> {
   );
 }
 
-async function logDenied(db: Db, actor: Actor, denial: DbGuardError): Promise<void> {
+async function logDenied(
+  db: Db,
+  actor: Actor,
+  denial: Pick<DbGuardError, "table" | "name" | "sqlstate" | "message" | "recordId">,
+): Promise<void> {
   await db.transaction(async (tx) => {
     await applyActor(tx, actor);
     await tx.execute(

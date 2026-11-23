@@ -10,7 +10,7 @@ import { assignNumber } from "@/lib/numbering";
 import { getSetting } from "@/lib/settings";
 import { createVehicle, recordPlate } from "@/lib/vehicles";
 import { approveForTest, createUser, rejectForTest } from "./fixtures";
-import { draft, submitted } from "./documents-fixtures";
+import { draft, submitted, SUBMIT_OPTS } from "./documents-fixtures";
 import { asActor, createTestDb, sqlstateOf, SYSTEM_USER_ID, type TestDb } from "./helpers";
 
 let t: TestDb;
@@ -19,8 +19,8 @@ let approver: string;
 
 beforeAll(async () => {
   t = await createTestDb();
-  userId = await createUser(t.migratorPool, { roles: ["WAREHOUSEMAN"] });
-  approver = await createUser(t.migratorPool, { roles: ["MANAGEMENT"] });
+  userId = await createUser(t.migratorPool, { roles: ["WAREHOUSEMAN", "FORMEN"] });
+  approver = await createUser(t.migratorPool, { roles: ["OWNER"] });
 });
 afterAll(() => t.close());
 
@@ -98,7 +98,7 @@ describe("documents keep what they were issued with", () => {
     await withActor(t.db, { userId, reason: "səhv avtomobil" }, (tx) =>
       tx.update(documents).set({ vehicleId: b.id }).where(eq(documents.id, draftId)),
     );
-    await withActor(t.db, { userId }, (tx) => submitDocument(tx, draftId));
+    await withActor(t.db, { userId }, (tx) => submitDocument(tx, draftId, SUBMIT_OPTS));
     await expect(
       withActor(t.db, { userId, reason: "x" }, (tx) =>
         tx.update(documents).set({ vehicleId: a.id }).where(eq(documents.id, draftId)),
@@ -108,13 +108,13 @@ describe("documents keep what they were issued with", () => {
 
   it("a corrected version keeps the original's number and snapshots", async () => {
     const car = await vehicle("40-CC-400");
-    const original = await submitted(t.db, userId, "QUSUR_AKTI", { vehicleId: car.id });
+    const original = await submitted(t.db, userId, "MEDAXIL", { vehicleId: car.id });
     await approveForTest(t.appPool, approver, original.id);
     await withActor(t.db, { userId }, (tx) =>
       recordPlate(tx, { vehicleId: car.id, plateDisplay: "40-CC-401", source: "INTAKE" }),
     );
     const v2 = await withActor(t.db, { userId }, (tx) => createNewVersion(tx, original.id));
-    await withActor(t.db, { userId }, (tx) => submitDocument(tx, v2));
+    await withActor(t.db, { userId }, (tx) => submitDocument(tx, v2, SUBMIT_OPTS));
     const { rows } = await t.migratorPool.query(
       "SELECT number, version, plate_snapshot, vin_snapshot FROM documents WHERE id = $1",
       [v2],
@@ -128,11 +128,13 @@ describe("documents keep what they were issued with", () => {
   });
 
   it("a rejected document is resubmitted with the same number, without using another", async () => {
-    const doc = await submitted(t.db, userId, "TEHVIL_TESLIM");
+    const doc = await submitted(t.db, userId, "QIYMET_PROTOKOLU");
     await rejectForTest(t.appPool, approver, doc.id);
-    const again = await withActor(t.db, { userId }, (tx) => submitDocument(tx, doc.id));
+    const again = await withActor(t.db, { userId }, (tx) =>
+      submitDocument(tx, doc.id, SUBMIT_OPTS),
+    );
     expect(again).toBe(doc.number);
-    const next = await submitted(t.db, userId, "TEHVIL_TESLIM");
+    const next = await submitted(t.db, userId, "QIYMET_PROTOKOLU");
     expect(Number(next.number.slice(-6))).toBe(Number(doc.number.slice(-6)) + 1);
 
     await rejectForTest(t.appPool, approver, doc.id);

@@ -10,6 +10,7 @@ import {
   PermissionDeniedError,
 } from "@/lib/db/errors";
 import { addVehicle, createContract } from "@/lib/contracts";
+import { registerTablet, setPin, signInWithPin } from "@/lib/auth";
 import { annulDocument, createNewVersion, submitDocument } from "@/lib/documents";
 import { openJob } from "@/lib/jobs";
 import { createVehicle } from "@/lib/vehicles";
@@ -23,8 +24,8 @@ let approver: string;
 
 beforeAll(async () => {
   t = await createTestDb();
-  creator = await createUser(t.migratorPool, { roles: ["WAREHOUSEMAN", "FORMEN"] });
-  approver = await createUser(t.migratorPool, { roles: ["MANAGEMENT"] });
+  creator = await createUser(t.migratorPool, { roles: ["WAREHOUSEMAN", "FORMEN", "MANAGEMENT"] });
+  approver = await createUser(t.migratorPool, { roles: ["OWNER"] });
   // At least one row in every table, so row-level delete triggers have something to refuse.
   await withActor(t.db, { userId: creator }, async (tx) => {
     const { id: vehicleId } = await createVehicle(tx, {
@@ -52,11 +53,19 @@ beforeAll(async () => {
     });
   });
   await approvedDoc();
+  // Sign-in tables (plan 03): a registered tablet, a PIN sign-in (session + attempt).
+  const formen = await createUser(t.migratorPool, { roles: ["FORMEN"] });
+  await withActor(t.db, { userId: formen }, (tx) => setPin(tx, formen, "4821"));
+  const deviceToken = await withActor(t.db, { userId: creator }, (tx) =>
+    registerTablet(tx, "Sex planşeti"),
+  );
+  const pin = await signInWithPin(t.db, { deviceToken, userId: formen, pin: "4821" });
+  if (pin.status !== "OK") throw new Error(`PIN sign-in failed: ${pin.status}`);
 });
 afterAll(() => t.close());
 
 async function approvedDoc(): Promise<{ id: string; number: string }> {
-  const doc = await submitted(t.db, creator);
+  const doc = await submitted(t.db, creator, "MEDAXIL");
   await approveForTest(t.appPool, approver, doc.id);
   return doc;
 }

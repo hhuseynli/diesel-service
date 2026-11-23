@@ -1,5 +1,8 @@
 import { withActor } from "@/lib/audit";
 import { createDraft, submitDocument, type DraftLine } from "@/lib/documents";
+
+/** Sales need a payment method to pick their approval steps (plan 03, A2). */
+export const SUBMIT_OPTS = { paymentMethod: "TRANSFER" } as const;
 import type { DocType } from "@/lib/documents/types";
 import type { Db } from "@/lib/db/types";
 
@@ -24,7 +27,7 @@ export async function submitted(
   extra: { vehicleId?: string } = {},
 ): Promise<{ id: string; number: string }> {
   const id = await draft(db, userId, type, extra);
-  const number = await withActor(db, { userId }, (tx) => submitDocument(tx, id));
+  const number = await withActor(db, { userId }, (tx) => submitDocument(tx, id, SUBMIT_OPTS));
   return { id, number };
 }
 

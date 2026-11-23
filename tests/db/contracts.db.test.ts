@@ -30,7 +30,7 @@ let days: { today: string; yesterday: string; tomorrow: string };
 
 beforeAll(async () => {
   t = await createTestDb();
-  manager = await createUser(t.migratorPool, { roles: ["MANAGEMENT", "FORMEN"] });
+  manager = await createUser(t.migratorPool, { roles: ["MANAGEMENT", "FORMEN", "WAREHOUSEMAN"] });
   days = await bakuDays(t.db);
 });
 afterAll(() => t.close());
@@ -504,10 +504,12 @@ describe("job contract links and roles (review of plan 02)", () => {
 
   it("the formen must hold the FORMEN (or OWNER) role", async () => {
     const cashier = await createUser(t.migratorPool, { roles: ["CASHIER"] });
+    // A manager (allowed to open jobs) names a cashier as the job's formen.
     await expect(
-      newJob(t.db, cashier, {
+      newJob(t.db, manager, {
         vehicleId: (await newVehicle(t.db, manager, "CNTRCT")).id,
         contragentId: await newClient(t.db, manager),
+        formenId: cashier,
       }),
     ).rejects.toBeInstanceOf(WrongRoleError);
   });

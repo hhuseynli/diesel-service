@@ -27,6 +27,9 @@ export const users = pgTable(
     phone: text("phone").notNull().unique(),
     email: text("email"),
     pinHash: text("pin_hash"),
+    // Office sign-in (plan 03, A6). Never copied into audit_log.
+    passwordHash: text("password_hash"),
+    totpSecretEnc: text("totp_secret_enc"),
     isActive: boolean("is_active").notNull().default(true),
     isSystem: boolean("is_system").notNull().default(false),
     createdAt: createdAt(),

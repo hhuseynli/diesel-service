@@ -134,6 +134,48 @@
       "when": 1795374352810,
       "tag": "0018_verifier_pass2_fixes",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1795374552669,
+      "tag": "0019_approvals_auth",
+      "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1795374711236,
+      "tag": "0020_approval_engine",
+      "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1795375957277,
+      "tag": "0021_auth_lock_from_attempts",
+      "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "7",
+      "when": 1795376032782,
+      "tag": "0022_approval_rule_integrity",
+      "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1795376854236,
+      "tag": "0023_auth_indexes",
+      "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1795376943219,
+      "tag": "0024_auth_approval_hardening",
+      "breakpoints": true
     }
   ]
 }
