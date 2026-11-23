@@ -741,7 +741,6 @@ label:has(input:focus-visible) {
 .chip input {
   position: absolute;
   opacity: 0;
-  pointer-events: none;
 }
 
 .chip .icon {
@@ -1631,7 +1630,6 @@ label:has(input:focus-visible) {
 .option input {
   position: absolute;
   opacity: 0;
-  pointer-events: none;
 }
 
 .option-dot {
@@ -1696,7 +1694,6 @@ label:has(input:focus-visible) {
 .check input {
   position: absolute;
   opacity: 0;
-  pointer-events: none;
 }
 
 .check-box {

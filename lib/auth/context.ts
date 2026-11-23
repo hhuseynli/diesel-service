@@ -1,5 +1,6 @@
 import "server-only";
 import { cookies } from "next/headers";
+import { cache } from "react";
 import { redirect } from "next/navigation";
 import { getDb } from "@/lib/db/client";
 import type { Tx } from "@/lib/db/types";
@@ -13,11 +14,15 @@ export const DEVICE_COOKIE = "ds_device";
 
 const secure = process.env.NODE_ENV === "production";
 
-export async function getSessionUser(): Promise<SessionUser | null> {
+/**
+ * The signed-in user, checked once per request: the bar and the page both ask, and two
+ * checks at once would both try to end an idle session.
+ */
+export const getSessionUser = cache(async (): Promise<SessionUser | null> => {
   const store = await cookies();
   const token = store.get(SESSION_COOKIE)?.value;
   return token ? validateSession(getDb(), token, store.get(DEVICE_COOKIE)?.value) : null;
-}
+});
 
 /**
  * The signed-in user, or a redirect to sign-in. Every screen that reads data calls this
