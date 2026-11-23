@@ -12,6 +12,7 @@ import {
   IDLE_SECONDS,
   MANAGER,
   MECHANIC,
+  MECHANIC_2,
   WAREHOUSE,
   withDatabase,
 } from "./fixtures";
@@ -66,6 +67,7 @@ async function main() {
     await add(FORMEN.name, FORMEN.phone, "FORMEN", { pin_hash: hashSecret(FORMEN.pin) });
     await add(WAREHOUSE.name, WAREHOUSE.phone, "WAREHOUSEMAN", {});
     await add(MECHANIC.name, MECHANIC.phone, "MECHANIC", {});
+    await add(MECHANIC_2.name, MECHANIC_2.phone, "MECHANIC", {});
     await client.query("INSERT INTO settings (key, value) VALUES ('tablet_idle_seconds', $1)", [
       JSON.stringify(IDLE_SECONDS),
     ]);

@@ -117,9 +117,9 @@ export async function ClientStep({ params, vehicle }: { params: Params; vehicle:
             </>
           )}
 
-          {params.new === "1" ? (
+          {params.new === "1" && !client ? (
             <form action={createClientAction} className="field">
-              <input type="hidden" name="back" value={href(params, { new: undefined })} />
+              <input type="hidden" name="back" value={href(params)} />
               <div className="chips">
                 <label className="chip">
                   <input type="radio" name="kind" value="FIZIKI" defaultChecked />

@@ -12,6 +12,7 @@ export const FORMEN = { name: "E2E Formen", phone: "+994509990003", pin: "4821" 
 /** No sign-in: the tablet spec acts for them through lib (their screens come later). */
 export const WAREHOUSE = { name: "E2E Anbardar", phone: "+994509990004" };
 export const MECHANIC = { name: "E2E Təmirçi", phone: "+994509990005" };
+export const MECHANIC_2 = { name: "E2E Təmirçi İki", phone: "+994509990006" };
 
 /** Tablet sessions lock after this many idle seconds in the e2e database. */
 export const IDLE_SECONDS = 3;
