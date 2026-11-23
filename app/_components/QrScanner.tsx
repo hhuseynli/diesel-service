@@ -30,6 +30,8 @@ export function QrScanner({ inputName, scanLabel }: { inputName: string; scanLab
     const detector = new Ctor({ formats: ["qr_code"] });
     (async () => {
       stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
+      // Closed while the camera was starting: turn it off again at once.
+      if (stopped) return stream.getTracks().forEach((t) => t.stop());
       const v = video.current!;
       v.srcObject = stream;
       await v.play();
@@ -43,7 +45,10 @@ export function QrScanner({ inputName, scanLabel }: { inputName: string; scanLab
         }
         await new Promise((r) => setTimeout(r, 250));
       }
-    })();
+    })().catch(() => {
+      // No camera, or permission refused: the typed sticker code still works.
+      setActive(false);
+    });
     return () => {
       stopped = true;
       stream?.getTracks().forEach((t) => t.stop());
