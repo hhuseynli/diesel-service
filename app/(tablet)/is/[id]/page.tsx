@@ -7,6 +7,7 @@ import { PhotoInput } from "@/app/_components/PhotoInput";
 import { SignaturePad } from "@/app/_components/SignaturePad";
 import { requireSessionUser } from "@/lib/auth/context";
 import { getDb } from "@/lib/db/client";
+import { isUuid } from "@/lib/db/uuid";
 import { qualityChecklist } from "@/lib/intake";
 import { jobCard, mechanics, type JobCard } from "@/lib/intake/queries";
 import type { JobStatus } from "@/lib/jobs/types";
@@ -94,7 +95,7 @@ export default async function JobPage({
 }) {
   await requireSessionUser();
   const { id } = await params;
-  if (!/^[0-9a-f-]{36}$/.test(id)) notFound();
+  if (!isUuid(id)) notFound();
   const query = await searchParams;
   const t = await getTranslations("job");
   const ti = await getTranslations("intake");
@@ -262,7 +263,7 @@ export default async function JobPage({
         jobField={jobField}
         checklist={checklist}
         failed={query.qc === "0"}
-        mechanicSelect={mechanicSelect(t("mechanic"), false)}
+        mechanicSelect={mechanicSelect(t("mechanic"), true)}
       />
 
       <Section icon="clipboard" title={t("findings")} count={job.findings.length}>
@@ -396,7 +397,7 @@ export default async function JobPage({
                   {t("removedPart")}
                   <input name="description" required />
                 </label>
-                {mechanicSelect(t("mechanic"), false)}
+                {mechanicSelect(t("mechanic"), true)}
                 <label>
                   {t("disposition")}
                   <select name="disposition">

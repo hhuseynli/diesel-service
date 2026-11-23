@@ -3,12 +3,13 @@ import { attachments } from "@/db/schema";
 import { getSessionUser } from "@/lib/auth/context";
 import { getDb } from "@/lib/db/client";
 import { getFileStore } from "@/lib/files";
+import { isUuid } from "@/lib/db/uuid";
 
 // A stored photo, video or signature, for signed-in staff only (spec 00, section 8).
 export async function GET(_req: Request, { params }: { params: Promise<{ id: string }> }) {
   if (!(await getSessionUser())) return new Response(null, { status: 401 });
   const { id } = await params;
-  if (!/^[0-9a-f-]{36}$/.test(id)) return new Response(null, { status: 404 });
+  if (!isUuid(id)) return new Response(null, { status: 404 });
   const [file] = await getDb()
     .select({ storageKey: attachments.storageKey, mimeType: attachments.mimeType })
     .from(attachments)

@@ -324,6 +324,20 @@ export async function startWork(tx: Tx, jobId: string): Promise<void> {
   await moveJob(tx, jobId, "TEMIRDE", "audit.workStarted");
 }
 
+/**
+ * The mechanic for a work row (R3): the one the formen chose, else the job's mechanic.
+ * A quality check or a removed part always names one.
+ */
+async function workMechanic(tx: Tx, jobId: string, chosen?: string): Promise<string> {
+  if (chosen) return chosen;
+  const [job] = await tx
+    .select({ mechanicId: jobOrders.mechanicId })
+    .from(jobOrders)
+    .where(eq(jobOrders.id, jobId));
+  if (!job?.mechanicId) throw new ClientInputError("Choose the mechanic who did the work");
+  return job.mechanicId;
+}
+
 export async function recordRemovedPart(
   tx: Tx,
   jobId: string,
@@ -335,9 +349,10 @@ export async function recordRemovedPart(
   },
 ): Promise<string> {
   await requirePermission(tx, "RECORD_INSPECTION");
+  const mechanicId = await workMechanic(tx, jobId, input.mechanicId);
   const [row] = await tx
     .insert(removedParts)
-    .values({ jobOrderId: jobId, ...input, description: input.description.trim() })
+    .values({ jobOrderId: jobId, ...input, mechanicId, description: input.description.trim() })
     .returning({ id: removedParts.id });
   return row!.id;
 }
@@ -373,7 +388,7 @@ export async function qualityCheck(
   const passed = checklist.every((item) => input.items[item] === true);
   await tx.insert(qualityChecks).values({
     jobOrderId: jobId,
-    mechanicId: input.mechanicId,
+    mechanicId: await workMechanic(tx, jobId, input.mechanicId),
     itemsChecked: input.items,
     passed,
     dashboardPhotoId: input.dashboardPhotoId,

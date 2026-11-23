@@ -79,4 +79,16 @@ describe("LocalFileStore", () => {
     );
     await expect(store.get("../../etc/passwd")).rejects.toBeInstanceOf(FileRejectedError);
   });
+
+  it("refuses a file whose contents are not the type it claims", async () => {
+    const store = new LocalFileStore(await mkdtemp(path.join(tmpdir(), "files-")));
+    const pdf = new TextEncoder().encode("%PDF-1.7 not a photo");
+    await expect(store.put(pdf, "image/jpeg")).rejects.toBeInstanceOf(FileRejectedError);
+    await expect(store.put(pdf, "application/pdf")).resolves.toMatchObject({
+      mimeType: "application/pdf",
+    });
+    const png = Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0]);
+    await expect(store.put(png, "image/png")).resolves.toMatchObject({ mimeType: "image/png" });
+    await expect(store.put(png, "image/jpeg")).rejects.toBeInstanceOf(FileRejectedError);
+  });
 });

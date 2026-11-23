@@ -99,6 +99,15 @@ export const PATH_TO: Record<Exclude<JobStatus, "BAGLANDI" | "LEGV">, JobStatus[
 
 let odometerKm = 10_000;
 
+/** A mechanic in the test database; files that reach HAZIR create one in beforeAll. */
+export async function anyMechanic(tx: Tx): Promise<string> {
+  const { rows } = await tx.execute<{ user_id: string }>(
+    sql`SELECT user_id FROM user_roles WHERE role = 'MECHANIC' AND revoked_at IS NULL LIMIT 1`,
+  );
+  if (!rows[0]) throw new Error("This test file needs a MECHANIC user (createUser in beforeAll)");
+  return rows[0].user_id;
+}
+
 /** An attachment row with random content, for tests that need evidence but no bytes. */
 export async function fakeAttachment(tx: Tx): Promise<string> {
   const hex = randomBytes(32).toString("hex");
@@ -120,6 +129,7 @@ export async function walk(db: Db, userId: string, jobId: string, statuses: JobS
         qualityCheck(tx, jobId, {
           items: Object.fromEntries((await qualityChecklist(tx)).map((i) => [i, true])),
           dashboardPhotoId: await fakeAttachment(tx),
+          mechanicId: await anyMechanic(tx),
         }),
       );
     } else {

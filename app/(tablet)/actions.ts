@@ -8,6 +8,7 @@ import { NotSignedInError, type SessionUser } from "@/lib/auth";
 import { withSessionActor } from "@/lib/auth/context";
 import { DbGuardError } from "@/lib/db/errors";
 import type { Tx } from "@/lib/db/types";
+import { isUuid } from "@/lib/db/uuid";
 import { FileRejectedError } from "@/lib/files";
 import {
   addFinding,
@@ -66,7 +67,7 @@ function intakeBack(form: FormData): string {
 /** A job id from a form, as a path segment that cannot leave /is/. */
 function jobIdOf(form: FormData): string {
   const id = text(form, "jobId");
-  return /^[0-9a-f-]{36}$/.test(id) ? id : "";
+  return isUuid(id) ? id : "";
 }
 
 /**
@@ -355,6 +356,7 @@ export async function handOverAction(form: FormData) {
   const signature = dataUrlBytes(text(form, "signature"));
   if (!signature) redirect(withError(back, "signatureMissing"));
   await act(back, async (tx) => {
+    await requirePermission(tx, "RECORD_INSPECTION");
     const sig = await storeAttachment(tx, signature);
     return handOver(tx, jobId, {
       signerName: text(form, "signerName"),

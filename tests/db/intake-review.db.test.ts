@@ -109,6 +109,7 @@ describe("what is added to a job, and when (0028)", () => {
             description: "Disk",
             photoId: await fakeAttachment(tx),
             disposition: "DISPOSED",
+            mechanicId: mechanic,
           }),
         ),
       ),
@@ -181,6 +182,103 @@ describe("what is added to a job, and when (0028)", () => {
         }),
       ),
     ).toBe("DM005");
+  });
+});
+
+describe("second review (0031)", () => {
+  it("who did the work is not rewritten once the job is ready (R3)", async () => {
+    const job = await jobAt("TEMIRDE", "RVWM");
+    const service = await as((tx) =>
+      addPlannedService(tx, job.id, { description: "Yağ", mechanicId: mechanic }),
+    );
+    await walk(t.db, formen, job.id, ["HAZIR"]);
+    expect(await sqlstateOf(as((tx) => assignMechanic(tx, job.id, mechanic)))).toBe("DM001");
+    expect(
+      await sqlstateOf(
+        withActor(t.db, { userId: formen, reason: "test" }, (tx) =>
+          tx
+            .update(plannedServices)
+            .set({ mechanicId: null })
+            .where(eq(plannedServices.id, service)),
+        ),
+      ),
+    ).toBe("DM001");
+  });
+
+  it("a finding's additional flag and correction cannot be changed afterwards", async () => {
+    const job = await jobAt("QEBUL", "RVWN");
+    const finding = await as(async (tx) =>
+      addFinding(tx, job.id, {
+        mechanicId: mechanic,
+        description: "Səs",
+        attachmentIds: [await fakeAttachment(tx)],
+      }),
+    );
+    const update = (values: Partial<typeof inspectionFindings.$inferInsert>) =>
+      withActor(t.db, { userId: formen, reason: "test" }, (tx) =>
+        tx.update(inspectionFindings).set(values).where(eq(inspectionFindings.id, finding)),
+      );
+    expect(await sqlstateOf(update({ additional: true }))).toBe("DM005");
+    expect(await sqlstateOf(update({ correctsId: finding, correctionReason: "x" }))).toBe("DM005");
+    await update({ description: "Güclü səs" });
+  });
+
+  it("the dashboard photo and the old part's photo are photos", async () => {
+    const job = await jobAt("TEMIRDE", "RVWP");
+    const pdf = async (tx: Tx) => {
+      const [row] = await tx
+        .insert(attachments)
+        .values({
+          storageKey: "e".repeat(64),
+          sha256: "e".repeat(64),
+          mimeType: "application/pdf",
+          sizeBytes: 10,
+        })
+        .onConflictDoNothing()
+        .returning({ id: attachments.id });
+      if (row) return row.id;
+      const [old] = await tx
+        .select({ id: attachments.id })
+        .from(attachments)
+        .where(eq(attachments.storageKey, "e".repeat(64)));
+      return old!.id;
+    };
+    expect(
+      await sqlstateOf(
+        as(async (tx) =>
+          recordRemovedPart(tx, job.id, {
+            description: "Disk",
+            photoId: await pdf(tx),
+            disposition: "DISPOSED",
+            mechanicId: mechanic,
+          }),
+        ),
+      ),
+    ).toBe("DM005");
+  });
+
+  it("HAZIR waits for parts requested during work too", async () => {
+    const job = await jobAt("TEMIRDE", "RVWS");
+    await as((tx) => addPartsRequest(tx, job.id, { description: "Filtr", quantity: "1" }));
+    expect(await sqlstateOf(walk(t.db, formen, job.id, ["HAZIR"]))).toBe("DM006");
+  });
+
+  it("a quality check or removed part names a mechanic: chosen, or the job's", async () => {
+    const job = await jobAt("TEMIRDE", "RVWR");
+    const part = (mechanicId?: string) =>
+      as(async (tx) =>
+        recordRemovedPart(tx, job.id, {
+          description: "Disk",
+          photoId: await fakeAttachment(tx),
+          disposition: "DISPOSED",
+          mechanicId,
+        }),
+      );
+    await expect(part()).rejects.toBeInstanceOf(ClientInputError);
+    await as((tx) => assignMechanic(tx, job.id, mechanic));
+    const id = await part();
+    const [row] = await t.db.select().from(removedParts).where(eq(removedParts.id, id));
+    expect(row!.mechanicId).toBe(mechanic);
   });
 });
 

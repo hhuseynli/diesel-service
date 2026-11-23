@@ -40,6 +40,9 @@ export function QrScanner({ inputName, scanLabel }: { inputName: string; scanLab
         if (hit) {
           const form = v.closest("form")!;
           (form.elements.namedItem(inputName) as HTMLInputElement).value = hit.rawValue;
+          // One scan per tap: the camera goes off, and "scan" is offered again if needed.
+          stream.getTracks().forEach((t) => t.stop());
+          setActive(false);
           form.requestSubmit();
           return;
         }

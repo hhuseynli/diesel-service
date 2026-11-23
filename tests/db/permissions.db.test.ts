@@ -130,6 +130,7 @@ describe("job transitions follow 'who triggers' (section 4)", () => {
             qualityCheck(tx, job.id, {
               items: Object.fromEntries((await qualityChecklist(tx)).map((i) => [i, true])),
               dashboardPhotoId: await fakeAttachment(tx),
+              mechanicId: users.MECHANIC,
             }),
           )
         : step(t.db, users[role], job.id, to);

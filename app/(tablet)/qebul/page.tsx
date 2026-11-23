@@ -9,6 +9,7 @@ import { SignaturePad } from "@/app/_components/SignaturePad";
 import { requireSessionUser } from "@/lib/auth/context";
 import { checkContract } from "@/lib/contracts";
 import { getDb } from "@/lib/db/client";
+import { isUuid } from "@/lib/db/uuid";
 import { INTAKE_SLOTS, lastClientOf } from "@/lib/intake";
 import {
   clientName,
@@ -41,7 +42,6 @@ import { Plate } from "../Plate";
 // Nothing is written to the job until "Saxla" (saveIntake), in one transaction.
 
 type Params = Record<string, string | undefined>;
-const UUID = /^[0-9a-f-]{36}$/;
 
 function href(params: Params, extra: Params = {}): string {
   const q = new URLSearchParams();
@@ -259,7 +259,7 @@ export default async function IntakePage({ searchParams }: { searchParams: Promi
     );
   }
 
-  if (!UUID.test(params.v!)) notFound();
+  if (!isUuid(params.v)) notFound();
   const vehicle = await vehicleSummary(db, params.v!);
   if (!vehicle) notFound();
 
@@ -440,7 +440,7 @@ export default async function IntakePage({ searchParams }: { searchParams: Promi
     );
   }
 
-  if (!UUID.test(params.c)) notFound();
+  if (!isUuid(params.c)) notFound();
   const client = await clientName(db, params.c);
   if (!client) notFound();
   const clientLine = (

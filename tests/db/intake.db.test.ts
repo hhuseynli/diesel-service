@@ -367,6 +367,7 @@ describe("workshop preconditions", () => {
       qualityCheck(tx, jobId, {
         items: { ...(await passAll(tx)), CAR_CLEAN: false },
         dashboardPhotoId: await fakeAttachment(tx),
+        mechanicId: mechanic,
       }),
     );
     expect(failed).toBe(false);

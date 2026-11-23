@@ -96,6 +96,7 @@ beforeAll(async () => {
       description: "Köhnə əyləc diski",
       photoId: await fakeAttachment(tx),
       disposition: "RETURNED_TO_CLIENT",
+      mechanicId: mechanic,
     }),
   );
   await walk(t.db, creator, job.id, ["HAZIR", "TEHVIL_VERILDI"]);

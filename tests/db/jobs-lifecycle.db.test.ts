@@ -45,6 +45,8 @@ beforeAll(async () => {
   // Walks every transition, so it holds OWNER; permissions.db.test checks each role.
   formen = await createUser(t.migratorPool, { roles: ["FORMEN", "OWNER"] });
   cashier = await createUser(t.migratorPool, { roles: ["CASHIER"] });
+  // The quality check names a mechanic (R3).
+  await createUser(t.migratorPool, { roles: ["MECHANIC"] });
   client = await newClient(t.db, formen);
 });
 afterAll(() => t.close());

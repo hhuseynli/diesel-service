@@ -33,11 +33,28 @@ export function sha256Hex(bytes: Uint8Array): string {
   return createHash("sha256").update(bytes).digest("hex");
 }
 
+/** How each accepted type begins; the type the browser declares is not trusted alone. */
+const SIGNATURES: Record<string, (b: Uint8Array) => boolean> = {
+  "image/jpeg": (b) => starts(b, 0, [0xff, 0xd8, 0xff]),
+  "image/png": (b) => starts(b, 0, [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+  "image/webp": (b) =>
+    starts(b, 0, [0x52, 0x49, 0x46, 0x46]) && starts(b, 8, [0x57, 0x45, 0x42, 0x50]),
+  "video/mp4": (b) => starts(b, 4, [0x66, 0x74, 0x79, 0x70]), // "ftyp"
+  "application/pdf": (b) => starts(b, 0, [0x25, 0x50, 0x44, 0x46, 0x2d]), // "%PDF-"
+};
+
+function starts(bytes: Uint8Array, at: number, prefix: number[]): boolean {
+  return bytes.length >= at + prefix.length && prefix.every((v, i) => bytes[at + i] === v);
+}
+
 export function checkFile(bytes: Uint8Array, mimeType: string): void {
   const limit = ALLOWED_TYPES[mimeType];
   if (limit === undefined) throw new FileRejectedError(`File type ${mimeType} is not accepted`);
   if (bytes.length === 0) throw new FileRejectedError("The file is empty");
   if (bytes.length > limit) throw new FileRejectedError(`The file is larger than ${limit} bytes`);
+  if (!SIGNATURES[mimeType]!(bytes)) {
+    throw new FileRejectedError(`The file's contents are not ${mimeType}`);
+  }
 }
 
 /** Content-addressed store on local disk: <root>/<ab>/<cd>/<sha256>. */
