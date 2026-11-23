@@ -1,25 +1,24 @@
 import Link from "next/link";
 import { getTranslations } from "next-intl/server";
-import { Icon } from "@/app/_components/Icon";
+import { Duration } from "@/app/_ui/Duration";
+import { Icon } from "@/app/_ui/Icon";
+import { Plate } from "@/app/_ui/Plate";
+import { StatusBadge } from "@/app/_ui/StatusBadge";
+import { TabletBar } from "@/app/_ui/TabletBar";
 import { requireSessionUser } from "@/lib/auth/context";
 import { getDb } from "@/lib/db/client";
 import { boardCards } from "@/lib/intake/queries";
 import type { JobStatus } from "@/lib/jobs/types";
-import { Plate } from "../Plate";
 
-// The job board (spec 01, 3.1): open jobs by status, oldest first; a card turns amber
-// after `job_board_amber_hours` in the same status.
+// The job board (spec 01, 3.1; design 1.4): five lanes by status family, cards longest
+// waiting first; a card waiting longer than `job_board_amber_hours` turns amber.
 
-const COLUMNS: JobStatus[] = [
-  "QEBUL",
-  "BAXIS",
-  "QIYMETLENDIRME",
-  "TESDIQ_GOZLEYIR",
-  "TESDIQLENDI",
-  "HISSE_GOZLEYIR",
-  "TEMIRDE",
-  "HAZIR",
-  "ODENILDI",
+const LANES: { key: "intake" | "office" | "waiting" | "work" | "ready"; codes: JobStatus[] }[] = [
+  { key: "intake", codes: ["QEBUL"] },
+  { key: "office", codes: ["BAXIS", "QIYMETLENDIRME"] },
+  { key: "waiting", codes: ["TESDIQ_GOZLEYIR", "HISSE_GOZLEYIR"] },
+  { key: "work", codes: ["TESDIQLENDI", "TEMIRDE"] },
+  { key: "ready", codes: ["HAZIR", "ODENILDI"] },
 ];
 
 export default async function BoardPage() {
@@ -27,91 +26,75 @@ export default async function BoardPage() {
   const t = await getTranslations("board");
   const ts = await getTranslations("status");
   const cards = await boardCards(getDb());
-  const columns = COLUMNS.map((status) => ({
-    status,
-    cards: cards.filter((c) => c.status === status),
-  }));
 
   return (
-    <main>
-      <div className="page-head">
-        <div>
-          <h1>{t("title")}</h1>
-          <p className="muted">{t("openCount", { count: cards.length })}</p>
-        </div>
-        <Link href="/qebul" className="btn primary large">
-          <Icon name="plus" />
+    <>
+      <TabletBar>
+        <Link href="/qebul" className="btn primary">
+          <Icon name="qr" size={24} />
           {t("receive")}
         </Link>
-      </div>
-
-      <nav className="chips" aria-label={t("summary")}>
-        {columns.map(({ status, cards: inColumn }) => (
-          <a
-            key={status}
-            href={`#${status}`}
-            className={`chip st-${status}${inColumn.length ? "" : " empty"}`}
-          >
-            <span className="dot" aria-hidden="true" />
-            {ts(status)}
-            <span className="count">{inColumn.length}</span>
-          </a>
-        ))}
-      </nav>
-
-      {cards.length === 0 && (
-        <div className="empty-state">
-          <Icon name="truck" size={40} />
-          <p>{t("noJobs")}</p>
-        </div>
-      )}
-
-      {columns.map(({ status, cards: inColumn }) => (
-        <section key={status} id={status} aria-label={ts(status)} className="lane">
-          {inColumn.length > 0 && (
-            <h2 className={`lane-head st-${status}`}>
-              <span className="dot" aria-hidden="true" />
-              {ts(status)}
-              <span className="count">{inColumn.length}</span>
-            </h2>
-          )}
-          <div className="card-grid">
-            {inColumn.map((c) => (
-              <Link
-                key={c.id}
-                href={`/is/${c.id}`}
-                className={`job-card st-${c.status}${c.amber ? " late" : ""}`}
-                data-testid="job-card"
-              >
-                <div className="job-card-top">
-                  <span className="mono muted">{c.number}</span>
-                  <span className={c.amber ? "time late" : "time"}>
-                    <Icon name="clock" size={14} />
-                    {t("hours", { hours: c.hoursInStatus })}
+        <Link href="/qebul?m=vin" className="btn outline">
+          <Icon name="plus" />
+          {t("newCar")}
+        </Link>
+      </TabletBar>
+      <main className="board">
+        {LANES.map((lane) => {
+          const inLane = cards.filter((c) => lane.codes.includes(c.status));
+          return (
+            <section key={lane.key} className="lane" aria-label={t(`lanes.${lane.key}`)}>
+              <div className="lane-head">
+                <span className="lane-title">
+                  <h2>{t(`lanes.${lane.key}`)}</h2>
+                  <span className="count">{inLane.length}</span>
+                </span>
+                {lane.codes.length > 1 && (
+                  <span className="lane-sub">
+                    {lane.codes.map((code) => (
+                      <span key={code} data-testid={`count-${code}`}>
+                        {ts(code)}
+                        <b>{inLane.filter((c) => c.status === code).length}</b>
+                      </span>
+                    ))}
                   </span>
-                </div>
-                <strong className="job-card-title">
-                  {[c.make, c.model].filter(Boolean).join(" ") || c.vinLast6}
-                </strong>
-                <div className="job-card-ids">
-                  {c.plate && <Plate value={c.plate} />}
-                  <span className="mono vin6">{c.vinLast6}</span>
-                </div>
-                <div className="job-card-meta">
-                  <span>
-                    <Icon name="user" size={16} />
-                    {c.client}
-                  </span>
-                  <span className={c.mechanic ? undefined : "muted"}>
-                    <Icon name="wrench" size={16} />
-                    {c.mechanic ?? t("noMechanic")}
-                  </span>
-                </div>
-              </Link>
-            ))}
-          </div>
-        </section>
-      ))}
-    </main>
+                )}
+              </div>
+              <div className="lane-cards">
+                {inLane.length === 0 && <span className="lane-empty">{t("laneEmpty")}</span>}
+                {inLane.map((c) => (
+                  <Link
+                    key={c.id}
+                    href={`/is/${c.id}`}
+                    className={c.late ? "jcard late" : "jcard"}
+                    data-testid="job-card"
+                    data-status={c.status}
+                  >
+                    <span className="jcard-title">
+                      {[c.make, c.model].filter(Boolean).join(" ") || c.client}
+                    </span>
+                    <Plate plate={c.plate} vin={c.vinLast6} size="sm" />
+                    <span className="jcard-row">
+                      <span>
+                        <Icon name="wrench" size={14} />
+                        <span className="ellipsis">{c.mechanic ?? t("noMechanic")}</span>
+                      </span>
+                      <span className="jcard-time" title={c.late ? t("late") : undefined}>
+                        {c.late && <Icon name="warn" size={14} stroke={2.4} />}
+                        <Duration minutes={c.minutesInStatus} />
+                      </span>
+                    </span>
+                    <span className="jcard-row">
+                      <span className="jcard-no">{c.number}</span>
+                      <StatusBadge status={c.status} size="sm" />
+                    </span>
+                  </Link>
+                ))}
+              </div>
+            </section>
+          );
+        })}
+      </main>
+    </>
   );
 }

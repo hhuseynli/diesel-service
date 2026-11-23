@@ -7,6 +7,13 @@ import { CASHIER, FORMEN, IDLE_SECONDS, MANAGER } from "./fixtures";
 
 const signedInAs = (name: string) => az.home.signedInAs.replace("{name}", name);
 
+/** Taps the PIN on the keypad and the tick. */
+async function typePin(page: Page, pin: string) {
+  const keypad = page.getByTestId("keypad");
+  for (const digit of pin) await keypad.getByRole("button", { name: digit, exact: true }).click();
+  await keypad.getByRole("button", { name: az.auth.signInPin }).click();
+}
+
 async function officeSignIn(page: Page, phone: string, password: string, totpCode?: string) {
   await page.goto("/giris");
   await page.getByLabel(az.auth.phone).fill(phone);
@@ -47,15 +54,15 @@ test("management needs a TOTP code; then registers the tablet; staff switch in b
   // On the tablet, signing out means switching user.
   await page.getByRole("button", { name: az.home.switchUser }).click();
   await expect(page).toHaveURL(/\/pin$/);
-  await page.getByLabel(az.auth.who).selectOption({ label: FORMEN.name });
-  await page.getByLabel(az.auth.pin).fill("0000");
-  await page.getByRole("button", { name: az.auth.pin }).click();
-  await expect(page.getByRole("main").getByRole("alert")).toHaveText(az.auth.errors.INVALID);
+  await expect(page.getByRole("heading", { name: az.auth.who })).toBeVisible();
+  await page.getByRole("link", { name: new RegExp(FORMEN.name) }).click();
+  await typePin(page, "0000");
+  await expect(page.getByRole("main").getByRole("alert")).toHaveText(az.auth.pinWrong);
 
-  await page.getByLabel(az.auth.who).selectOption({ label: FORMEN.name });
-  await page.getByLabel(az.auth.pin).fill(FORMEN.pin);
-  await page.getByRole("button", { name: az.auth.pin }).click();
-  await expect(page.getByRole("heading", { name: signedInAs(FORMEN.name) })).toBeVisible();
+  // A wrong PIN stays on the same person's keypad.
+  await typePin(page, FORMEN.pin);
+  await expect(page).toHaveURL(/\/isler$/);
+  await expect(page.getByRole("banner").getByText(FORMEN.name)).toBeVisible();
 
   // Idle longer than the tablet timeout: the next request goes back to the PIN screen.
   await page.waitForTimeout((IDLE_SECONDS + 1) * 1000);

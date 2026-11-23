@@ -6,16 +6,32 @@ import { useEffect, useRef } from "react";
  * On-screen signature (plan 04, B5, B11). The drawing is written as a PNG data URL into a
  * hidden input, which the form's server action stores as an attachment.
  */
-export function SignaturePad({ name, clearLabel }: { name: string; clearLabel: string }) {
+export function SignaturePad({
+  name,
+  label,
+  clearLabel,
+  invalid = false,
+}: {
+  name: string;
+  label: string;
+  clearLabel: string;
+  invalid?: boolean;
+}) {
   const canvas = useRef<HTMLCanvasElement>(null);
   const input = useRef<HTMLInputElement>(null);
   const drawing = useRef(false);
 
   useEffect(() => {
     const c = canvas.current!;
+    // Draw at the canvas's real size, so strokes land under the finger.
+    const box = c.getBoundingClientRect();
+    c.width = Math.round(box.width);
+    c.height = Math.round(box.height);
     const ctx = c.getContext("2d")!;
     ctx.lineWidth = 3;
     ctx.lineCap = "round";
+    ctx.lineJoin = "round";
+    ctx.strokeStyle = "#1f274f";
     const point = (e: PointerEvent) => {
       const r = c.getBoundingClientRect();
       return [
@@ -56,11 +72,19 @@ export function SignaturePad({ name, clearLabel }: { name: string; clearLabel: s
 
   return (
     <div className="signature">
-      <canvas ref={canvas} width={600} height={220} data-testid="signature" />
-      <input ref={input} type="hidden" name={name} required />
-      <button type="button" onClick={clear}>
-        {clearLabel}
-      </button>
+      <span className="label-row">
+        <span className="label">{label}</span>
+        <button type="button" className="btn sm" onClick={clear}>
+          {clearLabel}
+        </button>
+      </span>
+      <canvas
+        ref={canvas}
+        data-testid="signature"
+        aria-label={label}
+        style={invalid ? { borderColor: "var(--err)", borderWidth: 1.5 } : undefined}
+      />
+      <input ref={input} type="hidden" name={name} />
     </div>
   );
 }

@@ -1,9 +1,11 @@
 "use client";
 
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { Icon } from "./Icon";
 
-// The browser's BarcodeDetector (tablet Chrome) reads the sticker; the typed code is the
-// fallback (plan 04, B3). On a hit the token is put in the form's input and submitted.
+// The scan pad (2.1 Maşını tap): the browser's BarcodeDetector (tablet Chrome) reads the
+// sticker inside the frame; the typed code beside it is the fallback (plan 04, B3). On a
+// hit the token goes into the form's input and the form is submitted.
 
 interface Detector {
   detect(source: HTMLVideoElement): Promise<{ rawValue: string }[]>;
@@ -11,7 +13,21 @@ interface Detector {
 
 const noSubscribe = () => () => {};
 
-export function QrScanner({ inputName, scanLabel }: { inputName: string; scanLabel: string }) {
+export function QrScanner({
+  formId,
+  inputName,
+  title,
+  sub,
+  startLabel,
+  unsupported,
+}: {
+  formId: string;
+  inputName: string;
+  title: string;
+  sub: string;
+  startLabel: string;
+  unsupported: string;
+}) {
   const video = useRef<HTMLVideoElement>(null);
   const [active, setActive] = useState(false);
   // Known only in the browser; the server snapshot (false) keeps hydration consistent.
@@ -38,7 +54,7 @@ export function QrScanner({ inputName, scanLabel }: { inputName: string; scanLab
       while (!stopped) {
         const [hit] = await detector.detect(v).catch(() => []);
         if (hit) {
-          const form = v.closest("form")!;
+          const form = document.getElementById(formId) as HTMLFormElement;
           (form.elements.namedItem(inputName) as HTMLInputElement).value = hit.rawValue;
           // One scan per tap: the camera goes off, and "scan" is offered again if needed.
           stream.getTracks().forEach((t) => t.stop());
@@ -56,16 +72,23 @@ export function QrScanner({ inputName, scanLabel }: { inputName: string; scanLab
       stopped = true;
       stream?.getTracks().forEach((t) => t.stop());
     };
-  }, [active, inputName]);
+  }, [active, formId, inputName]);
 
-  if (!supported) return null;
   return (
-    <div>
-      {active ? (
-        <video ref={video} muted playsInline className="scanner" />
-      ) : (
-        <button type="button" onClick={() => setActive(true)}>
-          {scanLabel}
+    <div className="scan-pad">
+      <span className="scan-frame">
+        <i />
+        <i />
+        <i />
+        <i />
+        {active && <video ref={video} muted playsInline />}
+      </span>
+      <span className="h-card">{title}</span>
+      <span className="scan-sub">{supported ? sub : unsupported}</span>
+      {supported && !active && (
+        <button type="button" className="btn outline-light" onClick={() => setActive(true)}>
+          <Icon name="qr" size={22} />
+          {startLabel}
         </button>
       )}
     </div>

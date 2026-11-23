@@ -1,7 +1,8 @@
 import { getTranslations } from "next-intl/server";
-import { signInError } from "../sign-in-errors";
+import { Brand } from "@/app/_ui/Brand";
+import { Notice } from "@/app/_ui/Notice";
 import { signInAction } from "../actions";
-import { AuthBrand } from "../_components/AuthBrand";
+import { signInError } from "../sign-in-errors";
 
 // Office sign-in: phone and password, plus a TOTP code for management and the owner.
 export default async function SignInPage({
@@ -12,40 +13,51 @@ export default async function SignInPage({
   const t = await getTranslations("auth");
   const error = signInError((await searchParams).e);
   return (
-    <div className="auth">
-      <main className="auth-card">
-        <AuthBrand />
-        <h1>{t("signInTitle")}</h1>
-        {error && <p role="alert">{t(`errors.${error}`)}</p>}
-        <form action={signInAction}>
-          <label>
-            {t("phone")}
+    <main className="screen">
+      <div className="centered">
+        <form action={signInAction} className="card narrow left">
+          <Brand large />
+          <h1 className="h-screen">{t("signInTitle")}</h1>
+          {error && <Notice kind="error" role="alert" title={t(`errors.${error}`)} />}
+          <div className="field">
+            <label htmlFor="phone">{t("phone")}</label>
             <input
+              id="phone"
+              className="input"
               name="phone"
               type="tel"
               autoComplete="username"
               required
               placeholder={t("phonePlaceholder")}
             />
-          </label>
-          <label>
-            {t("password")}
-            <input name="password" type="password" autoComplete="current-password" required />
-          </label>
-          <label>
-            {t("totp")}
+          </div>
+          <div className="field">
+            <label htmlFor="password">{t("password")}</label>
             <input
+              id="password"
+              className="input"
+              name="password"
+              type="password"
+              autoComplete="current-password"
+              required
+            />
+          </div>
+          <div className="field">
+            <label htmlFor="totp">{t("totp")}</label>
+            <input
+              id="totp"
+              className="input mono"
               name="totp"
               inputMode="numeric"
               autoComplete="one-time-code"
               pattern="[0-9]{6}"
             />
-          </label>
-          <button type="submit" className="primary large">
+          </div>
+          <button type="submit" className="btn primary lg block">
             {t("signIn")}
           </button>
         </form>
-      </main>
-    </div>
+      </div>
+    </main>
   );
 }

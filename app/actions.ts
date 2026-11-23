@@ -34,14 +34,14 @@ export async function signInAction(form: FormData) {
 export async function pinAction(form: FormData) {
   const deviceToken = await getDeviceToken();
   if (!deviceToken) redirect("/pin?e=UNKNOWN_DEVICE");
-  const result = await signInWithPin(getDb(), {
-    deviceToken,
-    userId: text(form, "userId"),
-    pin: text(form, "pin"),
-  });
-  if (result.status !== "OK") redirect(`/pin?e=${result.status}`);
+  const userId = text(form, "userId");
+  const result = await signInWithPin(getDb(), { deviceToken, userId, pin: text(form, "pin") });
+  // A wrong PIN stays on the same person's keypad (design 1.2).
+  const who = /^[0-9a-f-]{36}$/.test(userId) ? `u=${userId}&` : "";
+  if (result.status !== "OK") redirect(`/pin?${who}e=${result.status}`);
   await setSessionCookie(result.token);
-  redirect("/");
+  // On the tablet the board is home (design 1.4).
+  redirect("/isler");
 }
 
 export async function signOutAction() {

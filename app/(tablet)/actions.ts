@@ -1,6 +1,7 @@
 "use server";
 
 import { eq } from "drizzle-orm";
+import { getTranslations } from "next-intl/server";
 import { redirect, unstable_rethrow } from "next/navigation";
 import { vehicles } from "@/db/schema";
 import { storeAttachment } from "@/lib/attachments";
@@ -109,7 +110,8 @@ async function storeFiles(tx: Tx, form: FormData, name: string): Promise<string[
 
 /** A whole number of km, or NaN; an empty field is not 0. */
 function kilometres(value: string): number {
-  return /^\d{1,9}$/.test(value) ? Number(value) : NaN;
+  const digits = value.replace(/\s/g, "");
+  return /^\d{1,9}$/.test(digits) ? Number(digits) : NaN;
 }
 
 // --- Intake wizard (spec 01, 3.2-3.5) --------------------------------------------------
@@ -234,63 +236,44 @@ export async function saveIntake(form: FormData) {
 
 // --- Job card (spec 01, 3.6-3.7) -------------------------------------------------------
 
-export async function addFindingAction(form: FormData) {
+/**
+ * 4.1 Tapıntı əlavə et: a finding (or a correction of one, with its reason), the planned
+ * service and the parts it needs, in one transaction. The database marks them additional
+ * once the estimate is with the client (0028).
+ */
+export async function saveFindingAction(form: FormData) {
   const jobId = jobIdOf(form);
-  const back = `/is/${jobId}`;
+  const findingId = text(form, "findingId");
+  const back = `/is/${jobId}/tapinti${findingId ? `?duzelt=${encodeURIComponent(findingId)}` : ""}`;
   await act(back, async (tx) => {
     await requirePermission(tx, "RECORD_INSPECTION");
+    const description = text(form, "description");
     const ids = await storeFiles(tx, form, "files");
-    if (ids.length === 0) redirect(withError(back, "findingNeedsPhoto"));
-    return addFinding(tx, jobId, {
-      mechanicId: text(form, "mechanicId"),
-      description: text(form, "description"),
-      attachmentIds: ids,
-    });
+    if (description || findingId) {
+      if (ids.length === 0) redirect(withError(back, "findingNeedsPhoto"));
+      const input = { mechanicId: text(form, "mechanicId"), description, attachmentIds: ids };
+      if (findingId) await correctFinding(tx, findingId, input, text(form, "reason"));
+      else await addFinding(tx, jobId, input);
+    }
+    const service = text(form, "service");
+    if (service) {
+      await addPlannedService(tx, jobId, {
+        description: service,
+        mechanicId: text(form, "mechanicId") || undefined,
+      });
+    }
+    const names = form.getAll("partName").map(String);
+    const qtys = form.getAll("partQty").map(String);
+    const units = form.getAll("partUnit").map(String);
+    for (const [i, name] of names.entries()) {
+      if (!name.trim()) continue;
+      await addPartsRequest(tx, jobId, {
+        description: name,
+        quantity: (qtys[i] ?? "1").trim().replace(",", ".") || "1",
+        unitHint: units[i] ?? "",
+      });
+    }
   });
-  redirect(back);
-}
-
-export async function correctFindingAction(form: FormData) {
-  const jobId = jobIdOf(form);
-  const back = `/is/${jobId}`;
-  await act(back, async (tx) => {
-    await requirePermission(tx, "RECORD_INSPECTION");
-    const ids = await storeFiles(tx, form, "files");
-    if (ids.length === 0) redirect(withError(back, "findingNeedsPhoto"));
-    return correctFinding(
-      tx,
-      text(form, "findingId"),
-      {
-        description: text(form, "description"),
-        mechanicId: text(form, "mechanicId"),
-        attachmentIds: ids,
-      },
-      text(form, "reason"),
-    );
-  });
-  redirect(back);
-}
-
-export async function addServiceAction(form: FormData) {
-  const jobId = jobIdOf(form);
-  await act(`/is/${jobId}`, (tx) =>
-    addPlannedService(tx, jobId, {
-      description: text(form, "description"),
-      mechanicId: text(form, "mechanicId") || undefined,
-    }),
-  );
-  redirect(`/is/${jobId}`);
-}
-
-export async function addPartAction(form: FormData) {
-  const jobId = jobIdOf(form);
-  await act(`/is/${jobId}`, (tx) =>
-    addPartsRequest(tx, jobId, {
-      description: text(form, "description"),
-      quantity: text(form, "quantity").replace(",", "."),
-      unitHint: text(form, "unit"),
-    }),
-  );
   redirect(`/is/${jobId}`);
 }
 
@@ -312,28 +295,33 @@ export async function startWorkAction(form: FormData) {
   redirect(`/is/${jobId}`);
 }
 
+/** 5.2 Köhnə hissə: the old part's photo, who replaced it and what happens to it (R7). */
 export async function removedPartAction(form: FormData) {
   const jobId = jobIdOf(form);
-  const back = `/is/${jobId}`;
+  const back = `/is/${jobId}/kohne`;
   await act(back, async (tx) => {
     await requirePermission(tx, "RECORD_INSPECTION");
+    const part = text(form, "part");
+    const description = part === "other" || !part ? text(form, "otherPart") : part;
+    if (!description) redirect(withError(back, "invalidInput"));
     const photo = await fileBytes(form.get("photo"));
     if (!photo) redirect(withError(back, "photosMissing"));
     const { id } = await storeAttachment(tx, photo);
     return recordRemovedPart(tx, jobId, {
-      description: text(form, "description"),
+      description,
       photoId: id,
       disposition: text(form, "disposition") as
         "RETURNED_TO_CLIENT" | "DISPOSED" | "WARRANTY_CLAIM",
       mechanicId: text(form, "mechanicId") || undefined,
     });
   });
-  redirect(back);
+  redirect(`/is/${jobId}`);
 }
 
+/** 5.3 Keyfiyyət yoxlaması: "Uğurlu: Hazır et" or "Uğursuz: təmirdə qalsın". */
 export async function qualityCheckAction(form: FormData) {
   const jobId = jobIdOf(form);
-  const back = `/is/${jobId}`;
+  const back = `/is/${jobId}/yoxlama`;
   const passed = await act(back, async (tx) => {
     await requirePermission(tx, "RECORD_INSPECTION");
     const photo = await fileBytes(form.get("dashboard"));
@@ -344,15 +332,16 @@ export async function qualityCheckAction(form: FormData) {
       items,
       dashboardPhotoId: id,
       mechanicId: text(form, "mechanicId") || undefined,
-      notes: text(form, "notes"),
+      failed: text(form, "result") === "fail",
     });
   });
-  redirect(`${back}${passed ? "" : "?qc=0"}`);
+  redirect(`/is/${jobId}${passed ? "" : "?qc=0"}`);
 }
 
+/** 6.1 Təhvil-Təslim: the act is numbered and signed by the person collecting the car. */
 export async function handOverAction(form: FormData) {
   const jobId = jobIdOf(form);
-  const back = `/is/${jobId}`;
+  const back = `/is/${jobId}/tehvil`;
   const signature = dataUrlBytes(text(form, "signature"));
   if (!signature) redirect(withError(back, "signatureMissing"));
   await act(back, async (tx) => {
@@ -364,22 +353,37 @@ export async function handOverAction(form: FormData) {
       signatureAttachmentId: sig.id,
     });
   });
-  redirect("/isler");
+  redirect(`/is/${jobId}`);
 }
 
-/** "Ləğv et" (spec 01, 6): the formen while in QEBUL, management after; always a reason. */
+/**
+ * 6.3 Ləğv et (spec 01, 6): the formen while in QEBUL, management after; the reason is the
+ * chosen one and the details, in Azerbaijani as the formen saw them.
+ */
 export async function cancelJobAction(form: FormData) {
   const jobId = jobIdOf(form);
-  await act(`/is/${jobId}`, (tx) => cancelJob(tx, jobId, text(form, "reason")));
-  redirect("/isler");
+  const t = await getTranslations("job.reasons");
+  const kind = text(form, "reasonKind");
+  const details = text(form, "details");
+  const label = ["refused", "wrongCar", "other"].includes(kind) ? t(kind) : "";
+  const reason = [kind === "other" ? "" : label, details].filter(Boolean).join(": ");
+  if (!reason) redirect(`/is/${jobId}?legv=1&e=reasonRequired`);
+  await act(`/is/${jobId}?legv=1`, (tx) => cancelJob(tx, jobId, reason));
+  redirect(`/is/${jobId}`);
+}
+
+/** A screen to return to: a job card or an intake step, never another site. */
+function screenBack(form: FormData): string {
+  const back = text(form, "back");
+  if (/^\/is\/[0-9a-f-]{36}$/.test(back)) return back;
+  return /^\/qebul\?[\w=&%.+-]*$/.test(back) ? back : "/isler";
 }
 
 /** Reprint from the job card or from the VIN check at intake (3.2: a lost sticker). */
 export async function reprintStickerAction(form: FormData) {
-  const jobId = jobIdOf(form);
-  const back = jobId ? `/is/${jobId}` : intakeBack(form);
-  const token = await act(back, (tx) =>
-    reprintSticker(tx, text(form, "vehicleId"), text(form, "reason")),
-  );
-  redirect(`/stiker/${token}`);
+  const back = screenBack(form);
+  const vehicleId = text(form, "vehicleId");
+  const self = `/stiker/yeni?v=${encodeURIComponent(vehicleId)}&back=${encodeURIComponent(back)}`;
+  const token = await act(self, (tx) => reprintSticker(tx, vehicleId, text(form, "reason")));
+  redirect(`/stiker/${token}?back=${encodeURIComponent(back)}`);
 }

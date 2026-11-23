@@ -339,16 +339,20 @@ export async function pinAllowed(db: Db | Tx, userId: string): Promise<boolean> 
 }
 
 /** The people who can switch in on the tablet: active, with a PIN, allowed, not locked. */
-export async function pinCandidates(db: Db): Promise<{ id: string; name: string }[]> {
-  const { rows } = await db.execute<{ id: string; name: string }>(sql`
-    SELECT u.id, u.full_name AS name FROM users u
+export async function pinCandidates(db: Db): Promise<{ id: string; name: string; role: Role }[]> {
+  const { rows } = await db.execute<{ id: string; name: string; role: Role }>(sql`
+    SELECT u.id, u.full_name AS name,
+           (SELECT r.role FROM user_roles r WHERE r.user_id = u.id AND r.revoked_at IS NULL
+             AND r.role IN ('FORMEN', 'WAREHOUSEMAN', 'CASHIER', 'BOOKKEEPER')
+             ORDER BY r.role LIMIT 1) AS role
+      FROM users u
      WHERE u.is_active AND u.pin_hash IS NOT NULL
        AND EXISTS (SELECT 1 FROM user_roles r WHERE r.user_id = u.id AND r.revoked_at IS NULL
                      AND r.role IN ('FORMEN', 'WAREHOUSEMAN', 'CASHIER', 'BOOKKEEPER'))
        AND NOT EXISTS (SELECT 1 FROM user_roles r WHERE r.user_id = u.id AND r.revoked_at IS NULL
                          AND r.role IN ('MANAGEMENT', 'OWNER'))
      ORDER BY u.full_name`);
-  const result: { id: string; name: string }[] = [];
+  const result: { id: string; name: string; role: Role }[] = [];
   for (const row of rows) if (!(await isLocked(db, row.id))) result.push(row);
   return result;
 }

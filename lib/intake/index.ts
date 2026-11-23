@@ -381,11 +381,13 @@ export async function qualityCheck(
     dashboardPhotoId: string;
     mechanicId?: string;
     notes?: string;
+    /** "Uğursuz: təmirdə qalsın": the formen fails the check whatever is ticked. */
+    failed?: boolean;
   },
 ): Promise<boolean> {
   await requirePermission(tx, "RECORD_INSPECTION");
   const checklist = await qualityChecklist(tx);
-  const passed = checklist.every((item) => input.items[item] === true);
+  const passed = !input.failed && checklist.every((item) => input.items[item] === true);
   await tx.insert(qualityChecks).values({
     jobOrderId: jobId,
     mechanicId: await workMechanic(tx, jobId, input.mechanicId),

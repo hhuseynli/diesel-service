@@ -8,8 +8,9 @@ import { getDb } from "@/lib/db/client";
 import { odometerAlerts } from "@/lib/intake/queries";
 import { groupThousands } from "@/lib/money";
 import type { Role } from "@/lib/users/roles";
-import { AuthBrand } from "./_components/AuthBrand";
-import { Icon } from "./_components/Icon";
+import { Brand } from "./_ui/Brand";
+import { Icon } from "./_ui/Icon";
+import { Notice } from "./_ui/Notice";
 import { registerTabletAction, signOutAction } from "./actions";
 
 // Signed-in home: who is signed in, their roles, the job board, sign-out; for management
@@ -36,75 +37,73 @@ export default async function HomePage() {
   const alerts = roles.includes("OWNER") ? await odometerAlerts(db) : [];
 
   return (
-    <div className="home">
-      <main>
-        <AuthBrand />
-        <section className="card">
-          <div className="home-hero">
-            <span className="avatar" aria-hidden="true">
+    <main className="screen">
+      <div className="centered">
+        <div className="card left">
+          <Brand large />
+          <div className="job-vehicle">
+            <span className="avatar xl" aria-hidden="true">
               {me!.name.slice(0, 1)}
             </span>
-            <div>
-              <h1>{t("signedInAs", { name: me!.name })}</h1>
-              <p className="muted">{t("roles", { roles: roles.map((r) => tr(r)).join(", ") })}</p>
-            </div>
+            <span className="who">
+              <h1 className="h-screen">{t("signedInAs", { name: me!.name })}</h1>
+              <span className="muted">
+                {t("roles", { roles: roles.map((r) => tr(r)).join(", ") })}
+              </span>
+            </span>
           </div>
-          <Link href="/isler" className="btn primary large block">
+          <Link href="/isler" className="btn primary lg block">
             <Icon name="board" />
             {t("openBoard")}
           </Link>
-        </section>
-        {alerts.length > 0 && (
-          <section className="card">
-            <h2 className="card-head">
-              <Icon name="gauge" />
-              {t("odometerAlerts")}
-              <span className="count">{alerts.length}</span>
-            </h2>
-            <ul className="results">
-              {alerts.map((a) => {
-                const values = { number: a.number, vin: a.vin, km: groupThousands(a.valueKm) };
-                return (
-                  <li key={a.jobId}>
-                    <Link href={`/is/${a.jobId}`}>
-                      <Icon name="alert" />
-                      {a.belowPrevious
-                        ? t("odometerLower", { ...values, reason: a.reason ?? "" })
-                        : t("odometerHigh", values)}
-                    </Link>
-                  </li>
-                );
-              })}
-            </ul>
-          </section>
-        )}
-        {onTablet ? (
-          <p className="notice info">
-            <Icon name="check" />
-            {t("tabletRegistered")}
-          </p>
-        ) : (
-          canRegister && (
-            <section className="card">
-              <form action={registerTabletAction}>
-                <div className="inline">
-                  <label>
-                    {t("tabletName")}
-                    <input name="name" required />
-                  </label>
-                  <button type="submit">{t("registerTablet")}</button>
-                </div>
-              </form>
+          {alerts.length > 0 && (
+            <section className="panel tight">
+              <span className="panel-head">
+                <h2 className="h-panel">{t("odometerAlerts")}</h2>
+                <span className="count">{alerts.length}</span>
+              </span>
+              <ul className="col">
+                {alerts.map((a) => {
+                  const values = { number: a.number, vin: a.vin, km: groupThousands(a.valueKm) };
+                  return (
+                    <li key={a.jobId}>
+                      <Link className="result" href={`/is/${a.jobId}`}>
+                        <Icon name="warn" />
+                        <span className="result-body">
+                          {a.belowPrevious
+                            ? t("odometerLower", { ...values, reason: a.reason ?? "" })
+                            : t("odometerHigh", values)}
+                        </span>
+                      </Link>
+                    </li>
+                  );
+                })}
+              </ul>
             </section>
-          )
-        )}
-        <form action={signOutAction} className="quiet">
-          <button type="submit" className="btn subtle">
-            <Icon name="switch" size={18} />
-            {onTablet ? t("switchUser") : t("signOut")}
-          </button>
-        </form>
-      </main>
-    </div>
+          )}
+          {onTablet ? (
+            <Notice kind="success" title={t("tabletRegistered")} />
+          ) : (
+            canRegister && (
+              <form action={registerTabletAction} className="inline">
+                <div className="field">
+                  <label htmlFor="tabletName">{t("tabletName")}</label>
+                  <input id="tabletName" className="input" name="name" required />
+                </div>
+                <button type="submit" className="btn outline" style={{ alignSelf: "flex-end" }}>
+                  {t("registerTablet")}
+                </button>
+              </form>
+            )
+          )}
+          <form action={signOutAction}>
+            <button type="submit" className="btn neutral block">
+              <Icon name="lock" size={18} />
+              {onTablet ? t("switchUser") : t("signOut")}
+            </button>
+          </form>
+        </div>
+      </div>
+    </main>
   );
 }

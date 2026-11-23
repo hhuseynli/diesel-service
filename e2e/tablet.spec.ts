@@ -1,7 +1,8 @@
-// Plan 04, P-e2e: the formen's tablet in portrait (800x1280). A new car from intake to
-// TEHVIL_VERILDI; the same car back again, found by its sticker code; a corporate car that
-// is not on its client's contract, then found by its sticker while still in the workshop. Warehouse and approval steps have no screens yet
-// (milestone 5), so the test takes them through lib as those staff.
+// Plan 04, P-e2e: the formen's tablet, landscape 1280x800 (design canvas "Planşet
+// (formen)"). A new car from intake to TEHVIL_VERILDI; the same car back again, found by
+// its sticker code; the plate shortcut; a corporate car not on its client's contract, then
+// found by its sticker while still in the workshop. Warehouse and approval steps have no
+// screens yet (milestone 5), so the test takes them through lib as those staff.
 import { randomBytes } from "node:crypto";
 import { expect, test, type Browser, type Page } from "@playwright/test";
 import { eq, sql } from "drizzle-orm";
@@ -14,15 +15,7 @@ import { registerTablet } from "../lib/auth";
 import { createContract } from "../lib/contracts";
 import { moveJob } from "../lib/jobs";
 import az from "../messages/az.json" with { type: "json" };
-import {
-  E2E_DB,
-  FORMEN,
-  IDLE_SECONDS,
-  MANAGER,
-  MECHANIC,
-  WAREHOUSE,
-  withDatabase,
-} from "./fixtures";
+import { E2E_DB, FORMEN, IDLE_SECONDS, MANAGER, WAREHOUSE, withDatabase } from "./fixtures";
 
 const SYSTEM_USER_ID = "00000000-0000-0000-0000-000000000001";
 
@@ -45,6 +38,8 @@ const photo = (name: string) => ({
   buffer: Buffer.concat([Buffer.from([0xff, 0xd8, 0xff]), randomBytes(512)]),
 });
 const main = () => page.getByRole("main");
+const button = (name: string) => page.getByRole("button", { name, exact: true });
+const link = (name: string) => page.getByRole("link", { name, exact: true });
 
 async function idleSeconds(seconds: number) {
   // The e2e database locks tablets after a few idle seconds (auth.spec); first page
@@ -70,70 +65,66 @@ async function userId(phone: string) {
   return u!.id;
 }
 
-async function sign(where = main()) {
-  const box = (await where.getByTestId("signature").boundingBox())!;
+async function sign() {
+  const box = (await page.getByTestId("signature").boundingBox())!;
   await page.mouse.move(box.x + 40, box.y + 60);
   await page.mouse.down();
-  await page.mouse.move(box.x + 200, box.y + 150, { steps: 8 });
+  await page.mouse.move(box.x + 200, box.y + 120, { steps: 8 });
   await page.mouse.move(box.x + 320, box.y + 70, { steps: 8 });
   await page.mouse.up();
 }
 
-/** The photo step: six photos and the odometer next to them (3.4), then "Davam et". */
+const status = (s: keyof typeof az.status) =>
+  expect(page.getByTestId("job-status")).toHaveText(az.status[s]);
+
+/** 2.1 → 2.3: a VIN the system does not know, then the car's details. */
+async function newVehicle(make: string, plate: string) {
+  await page.goto("/qebul");
+  await link(az.intake.mode.vin).click();
+  await page.getByLabel(az.intake.searchVin, { exact: true }).fill(vin());
+  await button(az.intake.find).click();
+  await expect(page.getByRole("heading", { name: az.intake.newVehicle })).toBeVisible();
+  await page.getByLabel(az.intake.make, { exact: true }).fill(make);
+  await page.getByLabel(az.intake.model, { exact: true }).fill("Actros");
+  await page.getByLabel(az.intake.plate, { exact: true }).fill(plate);
+  await button(az.ui.continue).click();
+  await expect(page.getByRole("heading", { name: az.intake.clientTitle })).toBeVisible();
+}
+
+/** 3.2 Foto və yürüş: six tiles and the odometer, then "Davam et". */
 async function takePhotos(km: string, reason?: string) {
-  await expect(main().getByRole("heading", { level: 1 })).toHaveText(az.intake.photos);
+  await expect(page.getByRole("heading", { name: az.intake.photosTitle })).toBeVisible();
   for (const [slot, label] of Object.entries(az.intake.slot)) {
     await page.getByLabel(label, { exact: true }).setInputFiles(photo(slot));
   }
-  await page.getByLabel(az.intake.odometer).fill(km);
-  if (reason) await page.getByLabel(az.intake.reason).fill(reason);
-  await page.getByRole("button", { name: az.intake.continue }).click();
+  await page.getByLabel(az.intake.kmLabel).fill(km);
+  if (reason) await page.getByLabel(az.intake.reasonRequired).fill(reason);
+  await button(az.ui.continue).click();
 }
 
-/** The last intake step: complaints, the driver's signature, "Saxla". */
-async function fillAndSave() {
-  await page.getByLabel(az.intake.complaints).fill("Əyləc pedalı yumşaqdır");
-  await page.getByLabel(az.intake.mechanicOptional).selectOption({ label: MECHANIC.name });
-  await page.getByLabel(az.intake.signerName).fill("Əli Məmmədov");
+/** 3.3 Şikayət və imza: the complaint, the driver's signature, "Saxla". */
+async function complaintsAndSave() {
+  await page.getByLabel(az.intake.complaint).fill("Əyləc pedalı yumşaqdır");
+  await page.getByLabel(az.intake.signerName, { exact: true }).fill("Əli Məmmədov");
   await page.getByLabel(az.intake.signerPhone, { exact: true }).fill("+994551234567");
   await sign();
-  await page.getByRole("button", { name: az.intake.save }).click();
-}
-
-async function photosAndSave(km: string) {
-  await takePhotos(km);
-  await fillAndSave();
+  await button(az.intake.saveOpen).click();
   await expect(page).toHaveURL(/\/is\/[0-9a-f-]{36}\?yeni=1/);
 }
 
 async function findBySticker(token: string) {
   await page.goto("/qebul");
-  await page.getByLabel(az.intake.qrCode).fill(token);
-  await page
-    .locator("form", { has: page.getByLabel(az.intake.qrCode) })
-    .getByRole("button", { name: az.intake.find })
-    .click();
-  await expect(main().getByText(/VIN-in son 6 simvolunu/)).toBeVisible();
-  await main().getByRole("link", { name: az.intake.vinMatches }).click();
+  await page.getByLabel(az.intake.searchCode, { exact: true }).fill(token);
+  await button(az.intake.find).click();
+  await expect(page.getByRole("heading", { name: az.intake.vinCheckHeading })).toBeVisible();
+  await link(az.intake.vinMatches).click();
 }
 
-async function newVehicle(make: string, plate: string) {
-  await page.goto("/qebul");
-  await page.getByLabel(az.intake.vin).fill(vin());
-  await page
-    .locator("form", { has: page.getByLabel(az.intake.vin) })
-    .getByRole("button", { name: az.intake.find })
-    .click();
-  await expect(main().getByRole("heading", { level: 1 })).toHaveText(az.intake.newVehicle);
-  await page.getByLabel(az.intake.make).fill(make);
-  await page.getByLabel(az.intake.model).fill("Actros");
-  await page.getByLabel(az.intake.plate).fill(plate);
-  await page.getByRole("button", { name: az.intake.create }).click();
-  await expect(main().getByRole("heading", { level: 1 })).toHaveText(az.intake.client);
+async function printSticker() {
+  await link(az.job.printSticker).click();
+  await expect(page.getByTestId("sticker").locator("svg")).toBeVisible();
+  return new URL(page.url()).pathname.split("/").pop()!;
 }
-
-const status = (s: keyof typeof az.status) =>
-  expect(page.getByTestId("job-status")).toHaveText(az.status[s]);
 
 // Serial, one signed-in tablet; dev compiles each screen on first visit, hence the timeout.
 test.describe.configure({ mode: "serial", timeout: 120_000 });
@@ -145,18 +136,19 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   const deviceToken = await withActor(db, { userId: managerId }, (tx) =>
     registerTablet(tx, "E2E planşet"),
   );
-  const context = await browser.newContext({ viewport: { width: 800, height: 1280 } });
+  const context = await browser.newContext({ viewport: { width: 1280, height: 800 } });
   await context.addCookies([
     { name: "ds_device", value: deviceToken, domain: "localhost", path: "/" },
   ]);
   page = await context.newPage();
   await page.goto("/pin");
-  await page.getByLabel(az.auth.who).selectOption({ label: FORMEN.name });
-  await page.getByLabel(az.auth.pin).fill(FORMEN.pin);
-  await page.getByRole("button", { name: az.auth.pin }).click();
-  await expect(
-    page.getByRole("heading", { name: az.home.signedInAs.replace("{name}", FORMEN.name) }),
-  ).toBeVisible();
+  await page.getByRole("link", { name: new RegExp(FORMEN.name) }).click();
+  const keypad = page.getByTestId("keypad");
+  for (const digit of FORMEN.pin) {
+    await keypad.getByRole("button", { name: digit, exact: true }).click();
+  }
+  await keypad.getByRole("button", { name: az.auth.signInPin }).click();
+  await expect(page).toHaveURL(/\/isler$/);
 });
 
 test.afterAll(async () => {
@@ -166,45 +158,40 @@ test.afterAll(async () => {
 });
 
 test("a new car from intake to handover", async () => {
-  await page.goto("/isler");
-  await main().getByRole("link", { name: az.board.receive }).click();
+  await link(az.board.receive).click();
   await newVehicle("Mercedes-Benz", "90-AB-123");
 
-  await page.getByText(az.intake.newClient).click();
+  // A new car has no last client: create one; an individual is not checked against contracts.
+  await link(az.intake.newClient).click();
   await page.getByLabel(az.intake.name, { exact: true }).fill("Əli Məmmədov");
   await page.getByLabel(az.intake.phone, { exact: true }).fill("+994551234567");
-  await page.getByRole("button", { name: az.intake.create }).click();
-  await photosAndSave("120000");
+  await button(az.intake.createClient).click();
+  await expect(page.getByTestId("selected-client")).toContainText("Əli Məmmədov");
+  await link(az.ui.continue).click();
+  await takePhotos("120000");
+  await complaintsAndSave();
 
   jobId = page.url().match(/\/is\/([0-9a-f-]{36})/)![1]!;
   await expect(main().getByText(/İş sifarişi IS-\d{4}-\d{6} açıldı/)).toBeVisible();
   await status("QEBUL");
+  stickerToken = await printSticker();
+  await page.goto(`/is/${jobId}`);
 
-  // The new car's first sticker.
-  await main().getByRole("link", { name: az.intake.printSticker }).click();
-  await expect(page.getByTestId("sticker").locator("svg")).toBeVisible();
-  stickerToken = page.url().split("/").pop()!;
-  await page.goBack();
-
-  // Inspection: a finding with a photo, a service and a part, then to the warehouse.
-  await page.getByLabel(az.job.finding).fill("Ön əyləc diskləri yeyilib");
-  await page
-    .locator("form", { has: page.getByLabel(az.job.finding) })
-    .getByLabel(az.job.mechanic)
-    .selectOption({ label: MECHANIC.name });
-  await page.getByLabel(az.job.findingPhotos).setInputFiles(photo("finding"));
-  await page.getByRole("button", { name: az.job.addFinding }).click();
-  await expect(main().getByText("Ön əyləc diskləri yeyilib")).toBeVisible();
-  await expect(main().getByRole("img", { name: az.job.findingPhotos })).toBeVisible();
+  // 4.1 Inspection: a finding with a photo, its service and a part, in one form.
+  await link(az.job.addFinding).click();
+  await page.getByLabel(az.job.what).fill("Ön əyləc diskləri yeyilib");
+  await page.getByLabel(az.job.mediaTile, { exact: true }).setInputFiles(photo("finding"));
   await page.getByLabel(az.job.service).fill("Ön əyləc disklərinin dəyişdirilməsi");
-  await page.getByRole("button", { name: az.job.addService }).click();
-  await page.getByLabel(az.job.part).fill("Əyləc diski");
-  await page.getByRole("button", { name: az.job.addPart }).click();
-  await expect(main().getByText(/Əyləc diski — 1/)).toBeVisible();
-  await page.getByRole("button", { name: az.job.sendToWarehouse }).click();
+  await page.getByLabel(az.job.part, { exact: true }).fill("Əyləc diski");
+  await button(az.ui.save).click();
+  await expect(page).toHaveURL(new RegExp(`/is/${jobId}$`));
+  await expect(main().getByText("Ön əyləc diskləri yeyilib")).toBeVisible();
+  await expect(main().getByRole("img", { name: az.job.media })).toBeVisible();
+  await expect(main().getByText("Əyləc diski", { exact: true })).toBeVisible();
+  await button(az.job.sendToWarehouse).click();
   await expect(page).toHaveURL(/\/isler$/);
   await expect(
-    main().getByRole("region", { name: az.status.BAXIS }).getByTestId("job-card"),
+    main().getByRole("region", { name: az.board.lanes.office }).getByTestId("job-card"),
   ).toHaveCount(1);
 
   // Warehouse prices it and the client approves (milestone 5 and 6 screens).
@@ -220,56 +207,64 @@ test("a new car from intake to handover", async () => {
   });
   await withActor(db, { userId: managerId }, (tx) => moveJob(tx, jobId, "TESDIQLENDI", "e2e"));
 
-  // Work, the old part, the quality check.
+  // 5.x Work, the old part, the quality check.
   await page.goto(`/is/${jobId}`);
-  await page.getByRole("button", { name: az.job.startWork }).click();
+  await button(az.job.startWork).click();
   await status("TEMIRDE");
-  await page.getByLabel(az.job.removedPart).fill("Köhnə əyləc diski");
-  await page.getByLabel(az.intake.takePhoto).setInputFiles(photo("removed"));
-  await page.getByRole("button", { name: az.job.addRemovedPart }).click();
-  await expect(main().getByText(/Köhnə əyləc diski — /)).toBeVisible();
+  await link(az.job.removedPart).click();
+  await page.getByLabel(az.job.otherPartName).fill("Köhnə əyləc diski");
+  await page.getByLabel(az.job.removedPhoto, { exact: true }).setInputFiles(photo("removed"));
+  await button(az.ui.save).click();
+  await expect(main().getByText("Köhnə əyləc diski")).toBeVisible();
+  await link(az.job.qualityCheck).click();
   for (const label of Object.values(az.job.check)) await page.getByLabel(label).check();
-  await page.getByLabel(az.job.dashboardPhoto).setInputFiles(photo("dashboard"));
-  await page.getByRole("button", { name: az.job.submitCheck }).click();
+  await page.getByLabel(az.job.dashboardPhoto, { exact: true }).setInputFiles(photo("dashboard"));
+  await button(az.job.qcPass).click();
   await status("HAZIR");
 
-  // Handover with the collector's signature.
-  await page.getByLabel(az.intake.signerName).fill("Əli Məmmədov");
+  // 6.1 Handover with the collector's signature.
+  await link(az.job.handOver).click();
+  await page.getByLabel(az.intake.signerName, { exact: true }).fill("Əli Məmmədov");
   await page.getByLabel(az.intake.signerPhone, { exact: true }).fill("+994551234567");
   await sign();
-  await page.getByRole("button", { name: az.job.handOver }).click();
-  await expect(page).toHaveURL(/\/isler$/);
-  await page.goto(`/is/${jobId}`);
+  await button(az.job.handOver).click();
   await status("TEHVIL_VERILDI");
-  await expect(main().getByText(az.job.waitingPayment)).toBeVisible();
+  await expect(page.getByTestId("next-step")).toContainText(az.job.next.handedOver);
 });
 
 test("the car returns: found by its sticker, last client offered, lower odometer needs a reason", async () => {
   // Handed over, the car has left the workshop: its unpaid job does not block a new visit.
   await findBySticker(stickerToken);
-  await expect(main().getByText(/Son ziyarətdəki müştəri: Əli Məmmədov/)).toBeVisible();
-  await main().getByRole("link", { name: az.intake.choose }).click();
-  await expect(main().getByText(/Əvvəlki yürüş: 120 000 km/)).toBeVisible();
-  // Lower than last time: refused on the photo step, before anything is uploaded.
-  await takePhotos("110000");
-  await expect(main().getByRole("alert")).toHaveText(az.errors.odometerReason);
-  await takePhotos("110000", "Panel dəyişdirilib");
-  await fillAndSave();
-  await expect(page).toHaveURL(/\/is\/[0-9a-f-]{36}\?yeni=1&od=1/);
+  await expect(main().getByText(/Son səfərdəki müştəri/)).toBeVisible();
+  await main()
+    .getByRole("link", { name: new RegExp(az.intake.choose) })
+    .click();
+  await link(az.ui.continue).click();
+  await expect(main().getByText(/Əvvəlki: 120 000 km/)).toBeVisible();
+
+  // Lower than last time: the reason is required before "Davam et".
+  for (const [slot, label] of Object.entries(az.intake.slot)) {
+    await page.getByLabel(label, { exact: true }).setInputFiles(photo(slot));
+  }
+  await page.getByLabel(az.intake.kmLabel).fill("110000");
+  await expect(main().getByRole("alert")).toContainText(az.intake.kmLowTitle);
+  await expect(button(az.ui.continue)).toBeDisabled();
+  await page.getByLabel(az.intake.reasonRequired).fill("Panel dəyişdirilib");
+  await button(az.ui.continue).click();
+  await complaintsAndSave();
+  await expect(page).toHaveURL(/od=1/);
   await expect(main().getByRole("alert")).toHaveText(az.job.odometerFlagged);
 });
 
 test("the plate is a shortcut that still leads through the VIN", async () => {
   await page.goto("/qebul");
-  await page.getByLabel(az.intake.plateSearch).fill("90 ab 123");
-  await page
-    .locator("form", { has: page.getByLabel(az.intake.plateSearch) })
-    .getByRole("button", { name: az.intake.find })
-    .click();
+  await link(az.intake.mode.plate).click();
+  await page.getByLabel(az.intake.searchPlate).fill("90 ab 123");
+  await button(az.intake.find).click();
   await main()
-    .getByRole("link", { name: /90-AB-123 \(cari nömrə\)/ })
+    .getByRole("link", { name: /90-AB-123/ })
     .click();
-  await expect(main().getByText(/VIN-in son 6 simvolunu/)).toBeVisible();
+  await expect(page.getByRole("heading", { name: az.intake.vinCheckHeading })).toBeVisible();
 });
 
 test("a corporate car not on its client's contract needs the formen's decision", async () => {
@@ -289,29 +284,30 @@ test("a corporate car not on its client's contract needs the formen's decision",
 
   await newVehicle("MAN", "10-KK-777");
   await page.getByLabel(az.intake.clientSearch).fill("Korporativ");
-  await page.getByRole("button", { name: az.intake.find }).click();
+  await page.getByLabel(az.intake.clientSearch).press("Enter");
   await main()
     .getByRole("link", { name: /E2E Korporativ MMC/ })
     .click();
-  await expect(main().getByRole("heading", { level: 1 })).toHaveText(az.intake.notOnContract);
-  await main().getByRole("link", { name: az.intake.separatePaid }).click();
-  await photosAndSave("54000");
+  await expect(main().getByText(az.intake.notOnContract)).toBeVisible();
+  await expect(button(az.ui.continue)).toBeDisabled();
+  await link(az.intake.separatePaid).click();
+  await link(az.ui.continue).click();
+  await takePhotos("54000");
+  await complaintsAndSave();
 
-  const id = page.url().match(/\/is\/([0-9a-f-]{36})/)![1]!;
+  corporateJobId = page.url().match(/\/is\/([0-9a-f-]{36})/)![1]!;
   const [job] = await db
     .select({ check: jobOrders.contractCheck, decision: jobOrders.contractDecision })
     .from(jobOrders)
-    .where(eq(jobOrders.id, id));
+    .where(eq(jobOrders.id, corporateJobId));
   expect(job).toEqual({ check: "NOT_ON_CONTRACT", decision: "SEPARATE_PAID" });
-  corporateJobId = id;
-  await main().getByRole("link", { name: az.intake.printSticker }).click();
-  await expect(page.getByTestId("sticker").locator("svg")).toBeVisible();
-  corporateSticker = page.url().split("/").pop()!;
+  corporateSticker = await printSticker();
 });
 
 test("a car still in the workshop leads to its open job", async () => {
   await findBySticker(corporateSticker);
   await expect(main().getByText(az.intake.openJobExists)).toBeVisible();
-  await main().getByRole("link", { name: az.intake.openJobLink }).click();
+  await link(az.intake.openJobLink).click();
   await expect(page).toHaveURL(new RegExp(`/is/${corporateJobId}$`));
+  await expect(page.getByTestId("job-status")).toHaveText(az.status.QEBUL);
 });
