@@ -59,7 +59,9 @@ test("a new car from intake to handover", async () => {
   // The photo is served back by /fayl to the signed-in tablet.
   const thumb = t.main().getByRole("img", { name: az.job.media });
   await expect(thumb).toBeVisible();
-  expect(await thumb.evaluate((img: HTMLImageElement) => img.naturalWidth)).toBeGreaterThan(0);
+  // (The test photos are random bytes behind a JPEG header, so check the response, not pixels.)
+  const served = await page.request.get((await thumb.getAttribute("src"))!);
+  expect(served.status()).toBe(200);
   await expect(t.main().getByText("Əyləc diski", { exact: true })).toBeVisible();
   await t.button(az.job.sendToWarehouse).click();
   await expect(page).toHaveURL(/\/isler$/);
