@@ -16,3 +16,6 @@ next-env.d.ts
 
 # Hand-written migration drafts (pnpm db:new <name> --from db/drafts/<file>)
 db/drafts/
+
+# Local file store in development (lib/files)
+var/

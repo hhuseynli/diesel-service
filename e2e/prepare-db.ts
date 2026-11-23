@@ -5,7 +5,16 @@ import { drizzle } from "drizzle-orm/node-postgres";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
 import { Client } from "pg";
 import { encryptSecret, hashSecret } from "@/lib/auth/crypto";
-import { CASHIER, E2E_DB, FORMEN, IDLE_SECONDS, MANAGER, withDatabase } from "./fixtures";
+import {
+  CASHIER,
+  E2E_DB,
+  FORMEN,
+  IDLE_SECONDS,
+  MANAGER,
+  MECHANIC,
+  WAREHOUSE,
+  withDatabase,
+} from "./fixtures";
 
 const SYSTEM_USER_ID = "00000000-0000-0000-0000-000000000001";
 const migratorUrl = process.env.MIGRATION_DATABASE_URL;
@@ -55,6 +64,8 @@ async function main() {
       totp_secret_enc: encryptSecret(MANAGER.totpSecret),
     });
     await add(FORMEN.name, FORMEN.phone, "FORMEN", { pin_hash: hashSecret(FORMEN.pin) });
+    await add(WAREHOUSE.name, WAREHOUSE.phone, "WAREHOUSEMAN", {});
+    await add(MECHANIC.name, MECHANIC.phone, "MECHANIC", {});
     await client.query("INSERT INTO settings (key, value) VALUES ('tablet_idle_seconds', $1)", [
       JSON.stringify(IDLE_SECONDS),
     ]);

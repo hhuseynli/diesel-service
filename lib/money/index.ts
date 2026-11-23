@@ -55,6 +55,13 @@ export class Quantity {
   toDb(): string {
     return toDecimalString(this.milli, QUANTITY_SCALE);
   }
+
+  /** Display form without trailing zeros: "2", "1,5", "1 234,125" (azerbaijani-ui skill). */
+  formatAz(): string {
+    const [whole, fraction] = this.toDb().split(".") as [string, string];
+    const trimmed = fraction.replace(/0+$/, "");
+    return `${groupThousands(whole)}${trimmed ? `,${trimmed}` : ""}`;
+  }
 }
 
 export class Rate {
@@ -133,9 +140,14 @@ export class Money {
   /** Display form for Azerbaijani screens and documents: "1 234,50" (azerbaijani-ui skill). */
   formatAz(): string {
     const [whole, fraction] = this.toDb().split(".") as [string, string];
-    const negative = whole.startsWith("-");
-    const digits = negative ? whole.slice(1) : whole;
-    const grouped = digits.replace(/\B(?=(\d{3})+(?!\d))/g, " ");
-    return `${negative ? "-" : ""}${grouped},${fraction}`;
+    return `${groupThousands(whole)},${fraction}`;
   }
+}
+
+/** A whole number with a space between thousands: "-1234567" -> "-1 234 567". */
+export function groupThousands(whole: string | number): string {
+  const digits = String(whole);
+  const negative = digits.startsWith("-");
+  const grouped = (negative ? digits.slice(1) : digits).replace(/\B(?=(\d{3})+(?!\d))/g, " ");
+  return `${negative ? "-" : ""}${grouped}`;
 }

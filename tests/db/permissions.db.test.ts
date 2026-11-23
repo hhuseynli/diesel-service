@@ -17,7 +17,16 @@ import { ROLES, type Role } from "@/lib/users/roles";
 import { createVehicle, recordPlate } from "@/lib/vehicles";
 import { createUser } from "./fixtures";
 import { createTestDb, type TestDb } from "./helpers";
-import { newClient, newJob, newVehicle, PATH_TO, walk } from "./jobs-fixtures";
+import { qualityCheck, qualityChecklist } from "@/lib/intake";
+import {
+  fakeAttachment,
+  newClient,
+  newJob,
+  newVehicle,
+  PATH_TO,
+  step,
+  walk,
+} from "./jobs-fixtures";
 
 let t: TestDb;
 const users = {} as Record<Role, string>;
@@ -114,8 +123,17 @@ describe("job transitions follow 'who triggers' (section 4)", () => {
       contragentId: await newClient(t.db, owner),
     });
     await walk(t.db, owner, job.id, PATH_TO[from]);
+    // HAZIR and TEHVIL_VERILDI are reached only through the quality check and handover.
     const move = (role: Role) =>
-      as(users[role], (tx) => moveJob(tx, job.id, to as Exclude<JobStatus, "LEGV">, "test"));
+      to === "HAZIR"
+        ? as(users[role], async (tx) =>
+            qualityCheck(tx, job.id, {
+              items: Object.fromEntries((await qualityChecklist(tx)).map((i) => [i, true])),
+              dashboardPhotoId: await fakeAttachment(tx),
+              mechanicId: users.MECHANIC,
+            }),
+          )
+        : step(t.db, users[role], job.id, to);
     await expect(move(refusedRole)).rejects.toBeInstanceOf(PermissionError);
     await move(allowedRole);
   });
@@ -143,6 +161,8 @@ describe("every row, against plan 03 (F29 for rows beyond section 10)", () => {
   it("matches the agreed matrix exactly", () => {
     expect(ACTIONS).toEqual({
       CREATE_JOB: ["FORMEN"],
+      RECORD_INSPECTION: ["FORMEN"],
+      PRINT_STICKER: ["FORMEN"],
       CANCEL_JOB_AT_INTAKE: ["FORMEN", "MANAGEMENT"],
       CANCEL_JOB: ["MANAGEMENT"],
       RESOLVE_HOLD: ["MANAGEMENT"],

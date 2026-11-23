@@ -47,6 +47,9 @@ export const jobOrders = pgTable(
     vinSnapshot: text("vin_snapshot"),
     plateSnapshot: text("plate_snapshot"),
     cancelReason: text("cancel_reason"),
+    // The formen's answer to "Sahibi dəyişib?" when the client differs from the
+    // vehicle's last job (spec 00, section 3a; plan 04, B7). Null when not asked.
+    ownerChanged: boolean("owner_changed"),
     // Set by the database on handover (TEHVIL_VERILDI) and never unset: the car has left.
     carReleased: boolean("car_released").notNull().default(false),
     createdAt: createdAt(),

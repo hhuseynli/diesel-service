@@ -7,3 +7,4 @@ export * from "./contracts";
 export * from "./jobs";
 export * from "./auth";
 export * from "./approvals";
+export * from "./intake";

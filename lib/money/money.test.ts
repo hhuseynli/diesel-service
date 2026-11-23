@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { Money, Quantity, Rate } from "./index";
+import { groupThousands, Money, Quantity, Rate } from "./index";
 
 describe("Money", () => {
   it("round-trips database strings exactly", () => {
@@ -63,6 +63,11 @@ describe("Money", () => {
     expect(Money.parse("1234567.05").formatAz()).toBe("1 234 567,05");
     expect(Money.parse("999.00").formatAz()).toBe("999,00");
     expect(Money.parse("-1234.50").formatAz()).toBe("-1 234,50");
+    expect(Quantity.parse("2").formatAz()).toBe("2");
+    expect(Quantity.parse("1.5").formatAz()).toBe("1,5");
+    expect(Quantity.parse("1234.125").formatAz()).toBe("1 234,125");
+    expect(groupThousands(120000)).toBe("120 000");
+    expect(groupThousands(999)).toBe("999");
   });
 });
 

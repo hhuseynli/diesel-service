@@ -82,8 +82,9 @@ export async function sqlstateOf(promise: Promise<unknown>): Promise<string | un
   try {
     await promise;
   } catch (e) {
-    const err = e as { code?: string; cause?: { code?: string } };
-    return err.code ?? err.cause?.code;
+    // pg errors carry `code`; DbGuardError (from withActor) carries `sqlstate`.
+    const err = e as { code?: string; sqlstate?: string; cause?: { code?: string } };
+    return err.code ?? err.sqlstate ?? err.cause?.code;
   }
   throw new Error("Expected the operation to fail, but it succeeded");
 }

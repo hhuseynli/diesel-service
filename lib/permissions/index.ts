@@ -10,6 +10,9 @@ import type { Role } from "@/lib/users/roles";
 
 export const ACTIONS = {
   CREATE_JOB: ["FORMEN"],
+  // Intake, inspection and workshop records on the tablet (spec 01; plan 04).
+  RECORD_INSPECTION: ["FORMEN"],
+  PRINT_STICKER: ["FORMEN"],
   CANCEL_JOB_AT_INTAKE: ["FORMEN", "MANAGEMENT"],
   CANCEL_JOB: ["MANAGEMENT"],
   RESOLVE_HOLD: ["MANAGEMENT"],
